@@ -1,0 +1,719 @@
+import React, { useState, useEffect, useRef } from 'react';
+import * as XLSX from 'xlsx';
+import { parseChartContent, formatPhoneDisplay } from './utils/ezeeinfoParser';
+
+const KEY = 'spyderzlink-bus-v1';
+const BUS_EMOJIS = ['🚌', '🚍', '⭐', '🌟', '🙏', '✨', '🛣️', '🎫', '🛋️', '❄️', '📍', '💖'];
+
+const R_EN = "Hi {name}, thank you for travelling with {bus} ({route}) yesterday! ⭐ redBus will send you a message on WhatsApp to rate your trip. If you enjoyed your journey, please give us a 5-star rating on redBus 🚌✨. As a new service, your rating helps us tremendously! 🙏";
+const R_TA = "வணக்கம் {name}, நேற்று {bus}-ல் ({route}) பயணம் செய்தமைக்கு மிக்க நன்றி! 🚌 உங்கள் பயணத்தை rate செய்ய redBus WhatsApp-ல் ஒரு செய்தி அனுப்பும். பயணம் பிடித்திருந்தால், redBus-ல் எங்களுக்கு 5-star rating கொடுங்கள் ⭐⭐⭐⭐⭐. உங்கள் ஆதரவு எங்களுக்கு மிகவும் உதவும்! 🙏✨";
+const D_EN = "Hi {name}, thank you for travelling with {bus} ({route}) yesterday! 🚌 How was your trip? If you enjoyed your journey, a quick 5-star Google review would really help our service: {link} ⭐⭐⭐⭐⭐ - Thank you! 🙏";
+const D_TA = "வணக்கம் {name}, நேற்று {bus}-ல் ({route}) பயணம் செய்தமைக்கு மிக்க நன்றி! 🚌 உங்கள் பயண அனுபவம் எப்படி இருந்தது? ஒரு நிமிடம் ஒதுக்கி எங்களுக்கு ஒரு Google review கொடுத்தால் மிகவும் உதவியாக இருக்கும்: {link} ⭐⭐⭐⭐⭐ - நன்றி! 🙏";
+
+export default function App() {
+  const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+
+  const [bus, setBus] = useState('SpyderZ Link');
+  const [route, setRoute] = useState('Udumalaipettai to Chennai');
+  const [date, setDate] = useState(yesterday);
+  const [googleLink, setGoogleLink] = useState('');
+  const [tplR, setTplR] = useState(R_TA);
+  const [tplD, setTplD] = useState(D_TA);
+  const [activeTab, setActiveTab] = useState('r');
+  const [useFirstName, setUseFirstName] = useState(false);
+  const [defSrc, setDefSrc] = useState('r');
+  const [pasteText, setPasteText] = useState('');
+  const [passengers, setPassengers] = useState([]);
+  const [isExample, setIsExample] = useState(true);
+  const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  const [theme, setTheme] = useState('light');
+  const [toastMsg, setToastMsg] = useState('');
+  const [dragOver, setDragOver] = useState(false);
+  const [delaySeconds, setDelaySeconds] = useState(6);
+
+  // Image Attachment State
+  const [attachImage, setAttachImage] = useState(true);
+  const [selectedImage, setSelectedImage] = useState(null); // base64 dataUrl
+
+  // WhatsApp Backend Connection State
+  const [waStatus, setWaStatus] = useState('connecting');
+  const [waQrCode, setWaQrCode] = useState(null);
+  const [waUserPhone, setWaUserPhone] = useState(null);
+  const [showQrModal, setShowQrModal] = useState(false);
+
+  // Batch Progress State
+  const [batchProgress, setBatchProgress] = useState({
+    isSending: false,
+    total: 0,
+    currentIndex: 0,
+    currentPassenger: null,
+    sentList: [],
+    failedList: []
+  });
+
+  const textareaRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const imgInputRef = useRef(null);
+
+  // Load default bus image & saved preferences
+  useEffect(() => {
+    fetch('/api/default-image')
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.dataUrl) {
+          setSelectedImage(data.dataUrl);
+        }
+      })
+      .catch(() => {});
+
+    try {
+      const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
+      if (saved) {
+        if (saved.bus) setBus(saved.bus);
+        if (saved.route) setRoute(saved.route);
+        if (saved.date) setDate(saved.date);
+        if (saved.googleLink) setGoogleLink(saved.googleLink);
+        if (saved.tplR) setTplR(saved.tplR);
+        if (saved.tplD) setTplD(saved.tplD);
+        if (saved.activeTab) setActiveTab(saved.activeTab);
+        if (saved.useFirstName !== undefined) setUseFirstName(saved.useFirstName);
+        if (saved.theme) setTheme(saved.theme);
+        if (saved.attachImage !== undefined) setAttachImage(saved.attachImage);
+      }
+    } catch (e) {}
+
+    // Auto-load yesterday's chart on startup
+    fetch('/api/upload-chart-pdf', { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.passengers) {
+          if (data.route) setRoute(data.route);
+          if (data.date) setDate(data.date);
+          setPassengers(data.passengers);
+          setIsExample(false);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const data = { bus, route, date, googleLink, tplR, tplD, activeTab, useFirstName, theme, attachImage };
+    try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) {}
+  }, [bus, route, date, googleLink, tplR, tplD, activeTab, useFirstName, theme, attachImage]);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
+  // Poll WhatsApp Status
+  useEffect(() => {
+    const pollStatus = async () => {
+      try {
+        const res = await fetch('/api/whatsapp/status');
+        if (res.ok) {
+          const data = await res.json();
+          setWaStatus(data.status);
+          setWaQrCode(data.qrCode);
+          setWaUserPhone(data.userPhone);
+        }
+      } catch (e) {}
+
+      try {
+        const progRes = await fetch('/api/send-batch/progress');
+        if (progRes.ok) {
+          const progData = await progRes.json();
+          setBatchProgress(progData);
+        }
+      } catch (e) {}
+    };
+
+    pollStatus();
+    const interval = setInterval(pollStatus, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const showToast = (msg) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(''), 2500);
+  };
+
+  const getDisplayName = (name) => {
+    let n = (name || '').trim();
+    if (!n || n.toLowerCase() === 'passenger' || n.toLowerCase() === 'sir/madam') return 'Sir/Madam';
+    if (useFirstName) n = n.split(/\s+/)[0];
+    return n;
+  };
+
+  const formatMessage = (p) => {
+    const tpl = (p && p.src === 'd') ? tplD : tplR;
+    const name = getDisplayName(p && p.name);
+    const seatStr = (p && p.seats && p.seats.length) ? p.seats.join(', ') : '';
+    return tpl
+      .split('{name}').join(name)
+      .split('{bus}').join(bus || 'SpyderZ Link')
+      .split('{route}').join(route || 'Udumalpet ↔ Chennai')
+      .split('{date}').join(date || 'yesterday')
+      .split('{seat}').join(seatStr)
+      .split('{link}').join(googleLink.trim() || '{link}');
+  };
+
+  // Insert tag or emoji at cursor in textarea
+  const insertText = (str) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const current = activeTab === 'd' ? tplD : tplR;
+    const updated = current.substring(0, start) + str + current.substring(end);
+    if (activeTab === 'd') setTplD(updated);
+    else setTplR(updated);
+    setTimeout(() => {
+      textarea.selectionStart = textarea.selectionEnd = start + str.length;
+      textarea.focus();
+    }, 10);
+  };
+
+  const handleCustomImageUpload = (file) => {
+    if (!file || !file.type.startsWith('image/')) return alert('Please select a valid image file (PNG/JPG).');
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setSelectedImage(e.target.result);
+      setAttachImage(true);
+      showToast('Attached bus image!');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleFileUpload = (file) => {
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (ext === 'pdf') {
+      const reader = new FileReader();
+      reader.onload = () => {
+        fetch('/api/upload-chart-pdf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ base64Pdf: reader.result })
+        })
+          .then(res => res.json())
+          .then(data => {
+            if (data.success && data.passengers) {
+              if (data.route) setRoute(data.route);
+              if (data.date) setDate(data.date);
+              setPassengers(data.passengers);
+              setIsExample(false);
+              showToast(`Loaded ${data.passengers.length} passengers (${data.totalSeats} seats) from PDF!`);
+            } else {
+              alert('Could not parse PDF: ' + (data.error || 'Unknown error'));
+            }
+          })
+          .catch(err => alert('Error parsing PDF: ' + err.message));
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+
+    if (ext === 'xlsx' || ext === 'xls') {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const wb = XLSX.read(data, { type: 'array' });
+          const firstSheet = wb.Sheets[wb.SheetNames[0]];
+          const csv = XLSX.utils.sheet_to_csv(firstSheet);
+          handleBuildList(csv);
+        } catch (err) {
+          alert('Could not parse Excel: ' + err.message);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      const reader = new FileReader();
+      reader.onload = (e) => handleBuildList(e.target.result);
+      reader.readAsText(file);
+    }
+  };
+
+  const handleBuildList = (textToParse = pasteText) => {
+    if (!textToParse.trim()) return showToast('Paste chart rows or upload a file first.');
+    const res = parseChartContent(textToParse, defSrc);
+    if (!res.rows.length) return showToast('No valid passenger phone numbers detected.');
+    if (res.detectedRoute) setRoute(res.detectedRoute);
+    if (res.detectedDate) setDate(res.detectedDate);
+    setPassengers(res.rows);
+    setIsExample(false);
+    setFilter('all');
+    setPasteText('');
+    showToast(`Loaded ${res.rows.length} passengers!`);
+  };
+
+  // 1-Click Send to All
+  const handleSendAll = async () => {
+    if (waStatus !== 'connected') {
+      setShowQrModal(true);
+      return;
+    }
+    if (!passengers.length) return alert('No passengers in list.');
+
+    const payloadPassengers = passengers.map(p => ({
+      num: p.num,
+      name: getDisplayName(p.name),
+      seats: p.seats,
+      src: p.src,
+      message: formatMessage(p)
+    }));
+
+    try {
+      const res = await fetch('/api/send-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          passengers: payloadPassengers,
+          imageBase64: attachImage ? selectedImage : null,
+          delaySeconds: Number(delaySeconds) || 6
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) alert('Failed: ' + (data.error || 'Unknown error'));
+      else showToast('🚀 Automated sending started!');
+    } catch (e) {
+      alert('Network error: ' + e.message);
+    }
+  };
+
+  const handleCancelSend = async () => {
+    if (confirm('Cancel remaining messages?')) {
+      try { await fetch('/api/send-batch/cancel', { method: 'POST' }); } catch (e) {}
+    }
+  };
+
+  const total = passengers.length;
+  const sentCount = (batchProgress.sentList || []).length;
+  const percentDone = total ? Math.round((sentCount / total) * 100) : 0;
+  const isSending = batchProgress.isSending;
+  const sentNumSet = new Set((batchProgress.sentList || []).map(s => s.num));
+
+  let displayList = passengers;
+  if (filter === 'todo') displayList = passengers.filter(p => !sentNumSet.has(p.num));
+  else if (filter === 'done') displayList = passengers.filter(p => sentNumSet.has(p.num));
+
+  if (search.trim()) {
+    const q = search.trim().toLowerCase();
+    displayList = displayList.filter(p =>
+      p.name.toLowerCase().includes(q) ||
+      p.num.includes(q) ||
+      (p.seats || []).join(' ').toLowerCase().includes(q)
+    );
+  }
+
+  return (
+    <div className="wrap">
+      {/* Header */}
+      <header className="top-header">
+        <div>
+          <span className="route-tag">🚌 {bus} · {route}</span>
+          <h1>SpyderZ Link Review Sender</h1>
+          <p className="lede">Send automated review reminders with custom text, emojis, and your bus brochure/photo to redBus & Direct passengers.</p>
+        </div>
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+          title="Toggle Theme"
+        >
+          {theme === 'dark' ? '☀️' : '🌙'}
+        </button>
+      </header>
+
+      {/* WhatsApp Status Bar */}
+      <section className="card" style={{ padding: '14px 18px', background: waStatus === 'connected' ? 'var(--accent-soft)' : 'var(--warn-bg)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 20 }}>{waStatus === 'connected' ? '🟢' : '📱'}</span>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 14, color: waStatus === 'connected' ? 'var(--accent)' : 'var(--warn)' }}>
+                {waStatus === 'connected'
+                  ? `WhatsApp Ready: Connected as +${waUserPhone || 'Bus Office'}`
+                  : 'WhatsApp Not Connected to Office Phone'}
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+                {waStatus === 'connected' ? 'Ready to send messages with images in 1 click.' : 'Scan QR code once to link office phone.'}
+              </div>
+            </div>
+          </div>
+          <div className="row-inline">
+            {waStatus === 'connected' ? (
+              <button type="button" className="btn btn-ghost btn-small" onClick={() => fetch('/api/whatsapp/disconnect', { method: 'POST' })}>
+                Disconnect
+              </button>
+            ) : (
+              <button type="button" className="btn btn-primary btn-small" onClick={() => setShowQrModal(true)}>
+                Scan QR Code
+              </button>
+            )}
+          </div>
+        </div>
+
+        {(showQrModal || (waStatus !== 'connected' && waQrCode)) && (
+          <div style={{ marginTop: 12, padding: 16, background: 'var(--surface)', borderRadius: 10, textAlign: 'center', border: '1px solid var(--line)' }}>
+            <h3 style={{ margin: '0 0 6px 0', fontSize: 16 }}>Link Bus Office WhatsApp Phone</h3>
+            <p style={{ margin: '0 0 12px 0', fontSize: 13, color: 'var(--muted)' }}>
+              Open WhatsApp on office phone &gt; Linked Devices &gt; Link a Device &gt; Scan this QR code:
+            </p>
+            {waQrCode ? (
+              <img src={waQrCode} alt="WhatsApp QR Code" style={{ width: 220, height: 220, margin: '0 auto', display: 'block', borderRadius: 8 }} />
+            ) : (
+              <div style={{ padding: 40, color: 'var(--muted)' }}>Generating QR code...</div>
+            )}
+            <div style={{ marginTop: 10 }}>
+              <button type="button" className="btn btn-ghost btn-small" onClick={() => setShowQrModal(false)}>
+                Hide QR Code
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Step 1: Upload Chart */}
+      <section className="card">
+        <div className="head">
+          <p className="eyebrow">Step 1</p>
+          <h2>Upload EzeeInfo Passenger Chart</h2>
+        </div>
+
+        <div
+          className={`dropzone ${dragOver ? 'dragover' : ''}`}
+          onClick={() => fileInputRef.current && fileInputRef.current.click()}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFileUpload(e.dataTransfer.files[0]);
+          }}
+        >
+          <span className="dropzone-icon">📥</span>
+          <span className="dropzone-text">Drop EzeeInfo PDF (Trip Chart.pdf), Excel (.xlsx), or CSV here</span>
+          <span className="dropzone-sub">or click to browse from computer</span>
+          <input
+            type="file"
+            ref={fileInputRef}
+            accept=".pdf,.xlsx,.xls,.csv,.tsv,.txt"
+            style={{ display: 'none' }}
+            onChange={(e) => { if (e.target.files && e.target.files[0]) handleFileUpload(e.target.files[0]); }}
+          />
+        </div>
+
+        <div className="row-inline" style={{ justifyContent: 'space-between' }}>
+          <div className="row-inline">
+            <span style={{ fontSize: 13, color: 'var(--muted)' }}>Default Source:</span>
+            <select
+              value={defSrc}
+              onChange={(e) => setDefSrc(e.target.value)}
+              style={{ width: 'auto', minHeight: 34, padding: '2px 8px', fontSize: 13 }}
+            >
+              <option value="r">redBus</option>
+              <option value="d">Direct</option>
+            </select>
+          </div>
+          <button
+            type="button"
+            className="btn btn-ghost btn-small"
+            style={{ fontWeight: 600, color: 'var(--accent)', borderColor: 'var(--accent)' }}
+            onClick={async () => {
+              try {
+                const res = await fetch('/api/upload-chart-pdf', { method: 'POST' });
+                const data = await res.json();
+                if (data.success && data.passengers) {
+                  if (data.route) setRoute(data.route);
+                  if (data.date) setDate(data.date);
+                  setPassengers(data.passengers);
+                  setIsExample(false);
+                  showToast(`Loaded yesterday's chart: ${data.passengers.length} passengers (${data.totalSeats} seats)!`);
+                }
+              } catch (e) {
+                alert('Error: ' + e.message);
+              }
+            }}
+          >
+            ⚡ Load Yesterday's Chart (18 Nov)
+          </button>
+        </div>
+      </section>
+
+      {/* Step 2: Message, Emojis & Image Attachment */}
+      <section className="card">
+        <div className="head">
+          <p className="eyebrow">Step 2</p>
+          <h2>Customize Message, Emojis & Bus Photo</h2>
+        </div>
+
+        {/* Channel Switch */}
+        <div className="tabs">
+          <button
+            type="button"
+            className={`tab ${activeTab === 'r' ? 'active' : ''}`}
+            onClick={() => setActiveTab('r')}
+          >
+            redBus Passengers
+          </button>
+          <button
+            type="button"
+            className={`tab ${activeTab === 'd' ? 'active' : ''}`}
+            onClick={() => setActiveTab('d')}
+          >
+            Direct Bookings (Google Review)
+          </button>
+        </div>
+
+        {activeTab === 'd' && (
+          <div className="field">
+            <label>Google Review Link</label>
+            <input
+              type="url"
+              value={googleLink}
+              onChange={(e) => setGoogleLink(e.target.value)}
+              placeholder="https://g.page/r/your-bus-service/review"
+            />
+          </div>
+        )}
+
+        {/* Message Editor */}
+        <div className="field">
+          <div className="row-inline" style={{ justifyContent: 'space-between' }}>
+            <span className="label">Message Text</span>
+            <div className="row-inline">
+              <button
+                type="button"
+                className="btn btn-ghost btn-small"
+                onClick={() => activeTab === 'd' ? setTplD(D_EN) : setTplR(R_EN)}
+              >
+                English
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-small"
+                onClick={() => activeTab === 'd' ? setTplD(D_TA) : setTplR(R_TA)}
+              >
+                தமிழ்
+              </button>
+            </div>
+          </div>
+
+          <textarea
+            ref={textareaRef}
+            rows={4}
+            value={activeTab === 'd' ? tplD : tplR}
+            onChange={(e) => activeTab === 'd' ? setTplD(e.target.value) : setTplR(e.target.value)}
+          />
+
+          {/* Emoji Toolbar */}
+          <div className="row-inline" style={{ gap: 4 }}>
+            <span className="hint" style={{ alignSelf: 'center', marginRight: 4 }}>Add Emoji:</span>
+            {BUS_EMOJIS.map(em => (
+              <button key={em} type="button" className="emoji-btn" onClick={() => insertText(' ' + em)}>
+                {em}
+              </button>
+            ))}
+          </div>
+
+          {/* Dynamic Tag Buttons */}
+          <div className="row-inline" style={{ gap: 4 }}>
+            <span className="hint" style={{ alignSelf: 'center', marginRight: 4 }}>Insert Tag:</span>
+            {['{name}', '{seat}', '{bus}', '{route}', '{date}'].map(tag => (
+              <button key={tag} type="button" className="tag-btn" onClick={() => insertText(tag)}>
+                + {tag}
+              </button>
+            ))}
+            {activeTab === 'd' && (
+              <button type="button" className="tag-btn" onClick={() => insertText('{link}')}>
+                + {'{link}'}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Image Attachment Box */}
+        <div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 14, background: 'var(--bg)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={attachImage}
+                onChange={(e) => setAttachImage(e.target.checked)}
+              />
+              <strong>Attach Bus Brochure / Photo with WhatsApp Message</strong>
+            </label>
+            <button
+              type="button"
+              className="btn btn-ghost btn-small"
+              onClick={() => imgInputRef.current && imgInputRef.current.click()}
+            >
+              Upload Custom Image
+            </button>
+            <input
+              type="file"
+              ref={imgInputRef}
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={(e) => { if (e.target.files && e.target.files[0]) handleCustomImageUpload(e.target.files[0]); }}
+            />
+          </div>
+
+          {attachImage && selectedImage && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <img src={selectedImage} alt="Bus Brochure Thumbnail" style={{ width: 120, height: 75, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--line)' }} />
+              <div style={{ fontSize: 13, color: 'var(--muted)' }}>
+                Passengers will receive this image in WhatsApp with your review reminder as the caption!
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* WhatsApp Preview Bubble */}
+        <div className="bubble-wrap">
+          <span className="label">Live WhatsApp Preview</span>
+          <div className="bubble">
+            {attachImage && selectedImage && (
+              <img src={selectedImage} alt="Preview attachment" style={{ maxWidth: '100%', maxHeight: 200, borderRadius: 8, marginBottom: 8, display: 'block', objectFit: 'cover' }} />
+            )}
+            <div>{formatMessage(passengers[0] || { name: 'Harikrishnan', num: '917708155207', seats: ['L1'], src: activeTab })}</div>
+          </div>
+        </div>
+      </section>
+
+      {/* Step 3: Send to All */}
+      <section className="card" id="step3">
+        <div className="head">
+          <p className="eyebrow">Step 3</p>
+          <h2>1-Click Delivery to All Passengers</h2>
+        </div>
+
+        <div style={{ padding: 18, border: '2px solid var(--accent)', borderRadius: 14, background: 'var(--surface)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>
+                {isSending ? `Sending to passengers (${batchProgress.currentIndex} of ${total})...` : `Ready to send to ${total} passengers`}
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--muted)' }}>
+                {attachImage ? 'Sending photo with formatted text caption & emojis.' : 'Sending text message with emojis.'}
+              </div>
+            </div>
+
+            <div className="row-inline">
+              <label style={{ fontSize: 12.5, color: 'var(--muted)' }}>Delay:</label>
+              <select
+                value={delaySeconds}
+                onChange={(e) => setDelaySeconds(e.target.value)}
+                disabled={isSending}
+                style={{ width: 'auto', minHeight: 34, padding: '2px 8px', fontSize: 12.5 }}
+              >
+                <option value={5}>5s per passenger</option>
+                <option value={6}>6s per passenger (Recommended)</option>
+                <option value={8}>8s per passenger</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="meter" style={{ height: 12 }}>
+            <span style={{ width: `${percentDone}%`, background: isSending ? 'linear-gradient(90deg, #0B7A47, #34D58A)' : 'var(--accent)' }}></span>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--muted)' }}>
+            <span><strong>{sentCount}</strong> sent of <strong>{total}</strong></span>
+            <span><strong>{percentDone}%</strong> completed</span>
+          </div>
+
+          {isSending ? (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={handleCancelSend}
+              style={{ minHeight: 50, fontSize: 16, color: 'var(--warn)', borderColor: 'var(--warn)' }}
+            >
+              ⏹ Stop / Cancel Sending
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleSendAll}
+              style={{ minHeight: 50, fontSize: 16, fontWeight: 700 }}
+            >
+              🚀 Send to All Passengers (1-Click)
+            </button>
+          )}
+        </div>
+
+        {/* Live Receipts */}
+        {(batchProgress.sentList && batchProgress.sentList.length > 0) && (
+          <div style={{ marginTop: 10 }}>
+            <h4 style={{ margin: '0 0 8px 0', fontSize: 14 }}>Live Delivery Receipts</h4>
+            <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 10, padding: 8, fontSize: 13, background: 'var(--bg)' }}>
+              {batchProgress.sentList.map((s, idx) => (
+                <div key={idx} style={{ padding: '4px 6px', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--line)' }}>
+                  <span>✓ <strong>{s.name}</strong> ({formatPhoneDisplay(s.num)}) {s.seats && s.seats.length ? `[Seats: ${s.seats.join(',')}]` : ''}</span>
+                  <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Sent at {s.time}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Passenger List */}
+        <div style={{ marginTop: 14 }}>
+          <div className="toolbar">
+            <div className="tabs">
+              <button type="button" className={`tab ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>
+                All <b>{total}</b>
+              </button>
+              <button type="button" className={`tab ${filter === 'todo' ? 'active' : ''}`} onClick={() => setFilter('todo')}>
+                Pending <b>{total - sentCount}</b>
+              </button>
+              <button type="button" className={`tab ${filter === 'done' ? 'active' : ''}`} onClick={() => setFilter('done')}>
+                Sent <b>{sentCount}</b>
+              </button>
+            </div>
+            <input
+              type="text"
+              className="search-input"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="🔍 Search name, phone..."
+            />
+          </div>
+
+          <ul className="list" style={{ marginTop: 10 }}>
+            {displayList.map(p => {
+              const isSent = sentNumSet.has(p.num);
+              return (
+                <li key={p.num} className={`row ${isSent ? 'done' : ''}`}>
+                  <div className="who">
+                    <div className="name-row">
+                      <span className="name">{getDisplayName(p.name)}</span>
+                      {p.seats && p.seats.length > 0 && <span className="seat-badge">{p.seats.join(', ')}</span>}
+                    </div>
+                    <div className="num-row">
+                      <span className="num">{formatPhoneDisplay(p.num)}</span>
+                    </div>
+                  </div>
+                  <span className={`chip ${p.src === 'd' ? 'chip-d' : 'chip-r'}`}>
+                    {p.src === 'd' ? 'Direct' : 'redBus'}
+                  </span>
+                  {isSent ? (
+                    <span style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 600 }}>✓ Sent</span>
+                  ) : (
+                    <span style={{ fontSize: 13, color: 'var(--muted)' }}>Pending</span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      </section>
+
+      {/* Toast */}
+      <div className={`toast ${toastMsg ? 'show' : ''}`} role="status">{toastMsg}</div>
+    </div>
+  );
+}
