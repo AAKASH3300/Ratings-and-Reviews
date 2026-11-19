@@ -128,10 +128,12 @@ app.post('/api/whatsapp/disconnect', async (req, res) => {
 
 // Default Hotel Image
 app.get('/api/default-image', (req, res) => {
-  const imgPath = path.join(__dirname, 'default_hotel_image.png');
-  if (fs.existsSync(imgPath)) {
-    const data = fs.readFileSync(imgPath).toString('base64');
-    return res.json({ success: true, dataUrl: `data:image/png;base64,${data}` });
+  const imgPath = path.join(__dirname, 'logo.jpg');
+  const fallback = path.join(__dirname, 'default_hotel_image.png');
+  const target = fs.existsSync(imgPath) ? imgPath : fallback;
+  if (fs.existsSync(target)) {
+    const data = fs.readFileSync(target).toString('base64');
+    return res.json({ success: true, dataUrl: `data:image/jpeg;base64,${data}` });
   }
   res.json({ success: false });
 });

@@ -1,41 +1,41 @@
 :root {
-  --bg: #F8FAFC;
+  --bg: #FAF8F5;
   --surface: #FFFFFF;
-  --ink: #0F172A;
-  --muted: #64748B;
-  --line: #E2E8F0;
-  --accent: #B45309;
-  --accent-hover: #92400E;
+  --ink: #2A1711;
+  --muted: #78615A;
+  --line: #E8DFD8;
+  --accent: #C59B27;
+  --accent-hover: #A67F1A;
   --on-accent: #FFFFFF;
-  --accent-soft: #FEF3C7;
-  --bubble: #F0FDF4;
-  --bubble-ink: #14532D;
+  --accent-soft: #FBF4E2;
+  --bubble: #FDF9F0;
+  --bubble-ink: #3D1E16;
   --warn: #9A5B00;
   --warn-bg: #FFFBEB;
-  --done: #94A3B8;
-  --badge-bg: #E0E7FF;
-  --badge-ink: #3730A3;
+  --done: #9C8E89;
+  --badge-bg: #4A2017;
+  --badge-ink: #F5D77F;
   --font-display: 'Space Grotesk', system-ui, -apple-system, sans-serif;
   --font-body: 'Inter', 'Noto Sans Tamil', system-ui, -apple-system, sans-serif;
 }
 
 [data-theme="dark"] {
-  --bg: #0B1120;
-  --surface: #1E293B;
-  --ink: #F1F5F9;
-  --muted: #94A3B8;
-  --line: #334155;
-  --accent: #F59E0B;
-  --accent-hover: #D97706;
-  --on-accent: #0F172A;
-  --accent-soft: #3B2B11;
-  --bubble: #064E3B;
-  --bubble-ink: #ECFDF5;
+  --bg: #1B120F;
+  --surface: #291B16;
+  --ink: #F7F3F0;
+  --muted: #A89893;
+  --line: #422E28;
+  --accent: #E5B869;
+  --accent-hover: #D4AF37;
+  --on-accent: #291B16;
+  --accent-soft: #3D2922;
+  --bubble: #331F19;
+  --bubble-ink: #FDF4E2;
   --warn: #FBBF24;
   --warn-bg: #451A03;
-  --done: #64748B;
-  --badge-bg: #312E81;
-  --badge-ink: #E0E7FF;
+  --done: #7D6B66;
+  --badge-bg: #1F110D;
+  --badge-ink: #F5D77F;
   color-scheme: dark;
 }
 

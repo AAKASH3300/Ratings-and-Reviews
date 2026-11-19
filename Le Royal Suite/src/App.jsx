@@ -256,10 +256,17 @@ export default function App() {
     <div className="wrap">
       {/* Header */}
       <header className="top-header">
-        <div>
-          <span className="hotel-tag">🏨 {hotel} · Hotel Stay</span>
-          <h1>Le Royal Suite Review Sender</h1>
-          <p className="lede">Send automated 5-star Google Review requests with your luxury suite photo/banner to guests after checkout.</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <img
+            src="/logo.jpg"
+            alt="Le Royal Suite Logo"
+            style={{ width: 52, height: 52, objectFit: 'cover', borderRadius: 10, border: '1.5px solid var(--accent)', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}
+          />
+          <div>
+            <span className="hotel-tag">🏨 {hotel} · Luxury Stay</span>
+            <h1>Le Royal Suite Review Sender</h1>
+            <p className="lede">Send 5-star Google Review requests with your official luxury logo to guests after checkout.</p>
+          </div>
         </div>
         <button
           type="button"
