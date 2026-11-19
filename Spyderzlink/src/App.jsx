@@ -310,10 +310,17 @@ export default function App() {
     <div className="wrap">
       {/* Header */}
       <header className="top-header">
-        <div>
-          <span className="route-tag">🚌 {bus} · {route}</span>
-          <h1>SpyderZ Link Review Sender</h1>
-          <p className="lede">Send automated review reminders with custom text, emojis, and your bus brochure/photo to redBus & Direct passengers.</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <img
+            src="/logo.jpg"
+            alt="SpyderZ Link Logo"
+            style={{ width: 110, height: 48, objectFit: 'contain', background: '#000', borderRadius: 8, padding: '4px 6px', border: '1px solid var(--line)', boxShadow: '0 2px 6px rgba(0,0,0,0.1)' }}
+          />
+          <div>
+            <span className="route-tag">🚌 {bus} · {route}</span>
+            <h1>SpyderZ Link Review Sender</h1>
+            <p className="lede">Send automated review reminders with custom text, emojis, and official logo to redBus & Direct passengers.</p>
+          </div>
         </div>
         <button
           type="button"
