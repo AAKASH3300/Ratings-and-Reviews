@@ -1,0 +1,21 @@
+Printed By Sana Holidays @ 30/10/2026 07:32 PM
+Schedule Name : Udumalaipettai to Chennai
+Trip Id : 588N48459S261030D
+Bus Type : Luxura Sleeper A/C (2+1), 8:20 PM
+Travel Date: 2026-10-30
+Driver Name : Sendhil kumar
+Driver Mobile : 8012228567
+Driver2 Name : Yasar
+Driver2 Mobile : 8778650612
+
+Seat No    PNR             BookedDate    Name             Age G Mobile        Fare  From           To        Boarding Point               Booked by
+L4         SPYQAUBX50600   2026-10-30    ASHWANTH         24  M 6382836622    690   Udumalaipet    Chennai   Udumalaipet - 8:20 PM        Redbus
+U9         SPYQAUI58M641   2026-10-30    ARUN PRAKASH     32  M 9840012345    540   Madathukulam   Chennai   Madathukulam - 8:30 PM       Direct
+L13        SPYQAUGB8969    2026-10-30    Lakshmi          55  F 8220801522    540   Palani         Chennai   Palani Complex - 9:05 PM     Redbus
+L14W       SPYQAUGB8969    2026-10-30    Santhos          26  M 8220801522    540   Palani         Chennai   Palani Complex - 9:05 PM     Redbus
+U2         SPYQAUIH1672    2026-10-30    Gowthaman        35  M 9342331226    590   Palani         Chennai   Palani Complex - 9:05 PM     Redbus
+U13        SPYQATMVZ912    2026-10-29    Banumathi        48  F 9445704763    690   Palani         Chennai   Kanakkanpatti - 9:20 PM      Redbus
+U14W       SPYQATMVZ912    2026-10-29    Vasanth          24  M 9445704763    690   Palani         Chennai   Kanakkanpatti - 9:20 PM      Redbus
+L5         SPYQAUJH2210    2026-10-30    Ananth           29  M 6382361789    690   Udumalaipet    Chennai   Udumalaipet - 8:20 PM        Redbus
+U5         SPYQAUKL9911    2026-10-30    Dinesh Kumar     31  M 9080208773    590   Palani         Chennai   Palani Complex - 9:05 PM     Redbus
+U4         SPYQAUOM3342    2026-10-30    Prabhakaran      38  M 7305836990    650   Madathukulam   Chennai   Madathukulam - 8:30 PM       Direct
