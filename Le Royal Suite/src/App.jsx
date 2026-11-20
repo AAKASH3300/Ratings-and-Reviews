@@ -248,7 +248,6 @@ export default function App() {
         alert('Failed to send: ' + (data.error || 'Unknown error'));
       } else {
         showToast(`✓ Review request sent to ${guestToSend.name}!`);
-        // Refresh batch progress to reflect sent state
         if (data.receipt) {
           setBatchProgress(prev => ({
             ...prev,
@@ -354,15 +353,15 @@ export default function App() {
     <div className="wrap">
       {/* Header */}
       <header className="top-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <img
             src="/logo.jpg"
             alt="Le Royal Suite Logo"
-            style={{ width: 54, height: 54, objectFit: 'cover', borderRadius: 10, border: '1.5px solid var(--accent)', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}
+            style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 12, border: '2px solid var(--accent)', boxShadow: '0 4px 12px rgba(197, 155, 39, 0.25)' }}
           />
           <div>
-            <span className="hotel-tag">🏨 {hotel} · Luxury Stay</span>
-            <h1>Le Royal Suite Review Sender</h1>
+            <span className="hotel-tag">🏨 {hotel} · Luxury Boutique Stay</span>
+            <h1>{hotel} Review Sender</h1>
             <p className="lede">Send 5-star Google Review requests with your official luxury logo to guests after checkout.</p>
           </div>
         </div>
@@ -376,18 +375,41 @@ export default function App() {
         </button>
       </header>
 
-      {/* WhatsApp Status Bar */}
-      <section className="card" style={{ padding: '14px 18px', background: waStatus === 'connected' ? 'var(--accent-soft)' : 'var(--warn-bg)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: 20 }}>{waStatus === 'connected' ? '🟢' : '📱'}</span>
+      {/* Brand & Property Customization Toolbar (Allows Modifying Hotel Name and Checkout Date) */}
+      <section className="meta-card">
+        <div className="meta-item">
+          <label>🏨 Hotel / Property Name (Click to edit)</label>
+          <input
+            type="text"
+            value={hotel}
+            onChange={(e) => setHotel(e.target.value)}
+            placeholder="e.g. Le Royal Suite"
+            title="Modify the property name here"
+          />
+        </div>
+        <div className="meta-item">
+          <label>📅 Guest Check-out Date</label>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            title="Modify checkout date"
+          />
+        </div>
+      </section>
+
+      {/* WhatsApp Status Bar with Pulsing Status Orb */}
+      <section className="card" style={{ padding: '16px 20px', background: waStatus === 'connected' ? 'var(--accent-soft)' : 'var(--warn-bg)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span className={`status-orb ${waStatus === 'connected' ? 'connected' : 'disconnected'}`}></span>
             <div>
-              <div style={{ fontWeight: 700, fontSize: 14, color: waStatus === 'connected' ? 'var(--accent)' : 'var(--warn)' }}>
+              <div style={{ fontWeight: 800, fontSize: 14.5, color: waStatus === 'connected' ? 'var(--accent)' : 'var(--warn)' }}>
                 {waStatus === 'connected'
                   ? `WhatsApp Ready: Connected as +${waUserPhone || 'Hotel Reception'}`
                   : 'WhatsApp Not Connected to Reception Phone'}
               </div>
-              <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+              <div style={{ fontSize: 13, color: 'var(--muted)' }}>
                 {waStatus === 'connected' ? 'Ready to send guest review requests in 1 click.' : 'Scan QR code once to link hotel reception phone.'}
               </div>
             </div>
@@ -406,17 +428,17 @@ export default function App() {
         </div>
 
         {(showQrModal || (waStatus !== 'connected' && waQrCode)) && (
-          <div style={{ marginTop: 12, padding: 16, background: 'var(--surface)', borderRadius: 10, textAlign: 'center', border: '1px solid var(--line)' }}>
-            <h3 style={{ margin: '0 0 6px 0', fontSize: 16 }}>Link Hotel Reception WhatsApp</h3>
-            <p style={{ margin: '0 0 12px 0', fontSize: 13, color: 'var(--muted)' }}>
+          <div style={{ marginTop: 14, padding: 20, background: 'var(--surface)', borderRadius: 14, textAlign: 'center', border: '1px solid var(--line)', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}>
+            <h3 style={{ margin: '0 0 6px 0', fontSize: 17, fontWeight: 700 }}>Link Hotel Reception WhatsApp</h3>
+            <p style={{ margin: '0 0 14px 0', fontSize: 13, color: 'var(--muted)' }}>
               Open WhatsApp on reception phone &gt; Linked Devices &gt; Link a Device &gt; Scan this QR code:
             </p>
             {waQrCode ? (
-              <img src={waQrCode} alt="WhatsApp QR Code" style={{ width: 220, height: 220, margin: '0 auto', display: 'block', borderRadius: 8 }} />
+              <img src={waQrCode} alt="WhatsApp QR Code" style={{ width: 220, height: 220, margin: '0 auto', display: 'block', borderRadius: 12, border: '1px solid var(--line)' }} />
             ) : (
               <div style={{ padding: 40, color: 'var(--muted)' }}>Generating QR code...</div>
             )}
-            <div style={{ marginTop: 10 }}>
+            <div style={{ marginTop: 12 }}>
               <button type="button" className="btn btn-ghost btn-small" onClick={() => setShowQrModal(false)}>
                 Hide QR Code
               </button>
@@ -436,8 +458,8 @@ export default function App() {
           {/* Left: Quick Add for 1 or 2 Members */}
           <div className="quick-add-box">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <strong style={{ fontSize: 14 }}>⚡ Quick Type & Send (1 or 2 Guests)</strong>
-              <span style={{ fontSize: 11, background: 'var(--accent-soft)', color: 'var(--accent)', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>Individual</span>
+              <strong style={{ fontSize: 14.5 }}>⚡ Quick Type & Send (1 or 2 Guests)</strong>
+              <span style={{ fontSize: 11, background: 'var(--accent-soft)', color: 'var(--accent)', padding: '3px 9px', borderRadius: 6, fontWeight: 700 }}>Individual</span>
             </div>
 
             <div className="field">
@@ -513,7 +535,7 @@ export default function App() {
           </div>
 
           {/* Right: Batch Upload or Paste Multiple Rows */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div
               className={`dropzone ${dragOver ? 'dragover' : ''}`}
               onClick={() => fileInputRef.current && fileInputRef.current.click()}
@@ -563,11 +585,11 @@ export default function App() {
         </div>
       </section>
 
-      {/* Step 2: Message & Live Preview (2-Column Split: Inputs on Left, Preview on Right) */}
+      {/* Step 2: Message & Live Preview (2-Column Split: Inputs on Left, Smartphone Preview on Right) */}
       <section className="card">
         <div className="head">
           <p className="eyebrow">Step 2</p>
-          <h2>Customize Review Message & Live WhatsApp Preview</h2>
+          <h2>Customize Review Message & WhatsApp Live Visualization</h2>
         </div>
 
         <div className="step2-split">
@@ -626,7 +648,7 @@ export default function App() {
             </div>
 
             {/* Image Attachment Box */}
-            <div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 14, background: 'var(--bg)' }}>
+            <div style={{ border: '1px solid var(--line)', borderRadius: 14, padding: 16, background: 'var(--bg)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
                 <label className="check">
                   <input
@@ -653,9 +675,9 @@ export default function App() {
               </div>
 
               {attachImage && selectedImage && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <img src={selectedImage} alt="Hotel Banner Thumbnail" style={{ width: 110, height: 70, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--line)' }} />
-                  <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <img src={selectedImage} alt="Hotel Banner Thumbnail" style={{ width: 120, height: 75, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--line)' }} />
+                  <div style={{ fontSize: 13, color: 'var(--muted)' }}>
                     Guests will receive this luxury photo with your review request as caption!
                   </div>
                 </div>
@@ -663,43 +685,60 @@ export default function App() {
             </div>
           </div>
 
-          {/* Right Column: Sticky Live WhatsApp Preview */}
+          {/* Right Column: Smartphone Mockup Frame for Live WhatsApp Preview */}
           <div className="preview-sticky">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span className="label" style={{ fontSize: 13, fontWeight: 700 }}>💬 Live WhatsApp Visualization</span>
-              <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}>Real-time updates</span>
+              <span className="label" style={{ fontSize: 13.5, fontWeight: 800 }}>📱 WhatsApp Live Visualization</span>
+              <span style={{ fontSize: 11.5, color: 'var(--accent)', fontWeight: 700 }}>Real-time updates</span>
             </div>
 
-            <div className="wa-phone-card">
-              <div className="wa-phone-header">
-                <div className="wa-phone-header-left">
-                  <img src="/logo.jpg" alt="Avatar" className="wa-avatar" />
-                  <div>
-                    <div className="wa-contact-name">{hotel}</div>
-                    <div className="wa-contact-status">online</div>
-                  </div>
-                </div>
-                <div style={{ fontSize: 16, opacity: 0.85 }}>📞 📹 ⫶</div>
+            <div className="phone-mockup-frame">
+              {/* Smartphone Status Bar & Dynamic Island */}
+              <div className="phone-notch-bar">
+                <span>9:41</span>
+                <div className="phone-dynamic-island"></div>
+                <span>5G 🔋</span>
               </div>
 
-              <div className="wa-chat-body">
-                <div className="wa-chat-bubble">
-                  {attachImage && selectedImage && (
-                    <img src={selectedImage} alt="Preview Attachment" className="wa-bubble-img" />
-                  )}
-                  <div>
-                    {formatMessage(guests[0] || { name: 'Rajesh Kumar', num: '919840012345', src: 'Direct' })}
+              <div className="wa-screen-inner">
+                {/* WhatsApp Verified Hotel Brand Header */}
+                <div className="wa-app-header">
+                  <div className="wa-app-header-left">
+                    <img src="/logo.jpg" alt="Avatar" className="wa-verified-avatar" style={{ objectFit: 'cover' }} />
+                    <div>
+                      <div className="wa-verified-name">
+                        {hotel} <span style={{ color: '#F5D77F', fontSize: 13 }} title="Verified Luxury Property">✓</span>
+                      </div>
+                      <div className="wa-online-status">
+                        <span className="wa-online-dot"></span> online
+                      </div>
+                    </div>
                   </div>
-                  <div className="wa-time-meta">
-                    <span>10:45 AM</span>
-                    <span className="wa-check">✓✓</span>
+                  <div style={{ fontSize: 16, opacity: 0.9 }}>📞 📹 ⫶</div>
+                </div>
+
+                {/* WhatsApp Chat Canvas */}
+                <div className="wa-chat-canvas">
+                  <div className="wa-chat-bubble">
+                    {attachImage && selectedImage && (
+                      <img src={selectedImage} alt="Preview Attachment" className="wa-bubble-img" />
+                    )}
+                    <div>
+                      {formatMessage(guests[0] || { name: 'Rajesh Kumar', num: '919840012345', src: 'Direct' })}
+                    </div>
+                    <div className="wa-time-meta">
+                      <span>10:45 AM</span>
+                      <span className="wa-check">✓✓</span>
+                    </div>
                   </div>
                 </div>
               </div>
+
+              <div className="phone-home-indicator"></div>
             </div>
 
-            <div style={{ fontSize: 12, color: 'var(--muted)', background: 'var(--surface)', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--line)', lineHeight: 1.4 }}>
-              💡 <strong>Instant Preview:</strong> Any changes made on the left (text, emojis, photo) appear right here as your guest will see it on WhatsApp.
+            <div style={{ fontSize: 12.5, color: 'var(--muted)', background: 'var(--surface)', padding: '12px 14px', borderRadius: 10, border: '1px solid var(--line)', lineHeight: 1.45 }}>
+              💡 <strong>Instant Visualization:</strong> Any changes made on the left (text, emojis, photo) appear right here on this screen as your guest will see it on WhatsApp.
             </div>
           </div>
         </div>
@@ -712,10 +751,10 @@ export default function App() {
           <h2>Delivery to All Guests ({total} Total)</h2>
         </div>
 
-        <div style={{ padding: 18, border: '2px solid var(--accent)', borderRadius: 14, background: 'var(--surface)', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ padding: 20, border: '2px solid var(--accent)', borderRadius: 16, background: 'var(--surface)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
             <div>
-              <div style={{ fontSize: 18, fontWeight: 700 }}>
+              <div style={{ fontSize: 18.5, fontWeight: 800 }}>
                 {isSending ? `Sending to guests (${batchProgress.currentIndex} of ${total})...` : `Ready to send to ${total} guests`}
               </div>
               <div style={{ fontSize: 13, color: 'var(--muted)' }}>
@@ -724,12 +763,12 @@ export default function App() {
             </div>
 
             <div className="row-inline">
-              <label style={{ fontSize: 12.5, color: 'var(--muted)' }}>Delay:</label>
+              <label style={{ fontSize: 13, color: 'var(--muted)', fontWeight: 600 }}>Delay:</label>
               <select
                 value={delaySeconds}
                 onChange={(e) => setDelaySeconds(e.target.value)}
                 disabled={isSending}
-                style={{ width: 'auto', minHeight: 34, padding: '2px 8px', fontSize: 12.5 }}
+                style={{ width: 'auto', minHeight: 36, padding: '3px 10px', fontSize: 13 }}
               >
                 <option value={5}>5s per guest</option>
                 <option value={6}>6s per guest (Recommended)</option>
@@ -752,7 +791,7 @@ export default function App() {
               type="button"
               className="btn btn-ghost"
               onClick={handleCancelSend}
-              style={{ minHeight: 50, fontSize: 16, color: 'var(--warn)', borderColor: 'var(--warn)' }}
+              style={{ minHeight: 52, fontSize: 16, color: 'var(--warn)', borderColor: 'var(--warn)' }}
             >
               ⏹ Stop / Cancel Sending
             </button>
@@ -761,7 +800,7 @@ export default function App() {
               type="button"
               className="btn btn-primary"
               onClick={handleSendAll}
-              style={{ minHeight: 50, fontSize: 16, fontWeight: 700 }}
+              style={{ minHeight: 52, fontSize: 16, fontWeight: 800 }}
             >
               🚀 Send to All Guests (1-Click)
             </button>
@@ -770,13 +809,13 @@ export default function App() {
 
         {/* Live Receipts */}
         {(batchProgress.sentList && batchProgress.sentList.length > 0) && (
-          <div style={{ marginTop: 10 }}>
-            <h4 style={{ margin: '0 0 8px 0', fontSize: 14 }}>Live Delivery Receipts</h4>
-            <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 10, padding: 8, fontSize: 13, background: 'var(--bg)' }}>
+          <div style={{ marginTop: 12 }}>
+            <h4 style={{ margin: '0 0 8px 0', fontSize: 14.5 }}>Live Delivery Receipts</h4>
+            <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 12, padding: 10, fontSize: 13, background: 'var(--bg)' }}>
               {batchProgress.sentList.map((s, idx) => (
-                <div key={idx} style={{ padding: '4px 6px', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--line)' }}>
+                <div key={idx} style={{ padding: '6px 8px', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--line)' }}>
                   <span>✓ <strong>{s.name}</strong> ({formatPhoneDisplay(s.num)})</span>
-                  <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Sent at {s.time}</span>
+                  <span style={{ color: 'var(--accent)', fontWeight: 700 }}>Sent at {s.time}</span>
                 </div>
               ))}
             </div>
@@ -806,7 +845,7 @@ export default function App() {
             />
           </div>
 
-          <ul className="list" style={{ marginTop: 10 }}>
+          <ul className="list" style={{ marginTop: 12 }}>
             {displayList.map(g => {
               const isSent = sentNumSet.has(g.num);
               const isSendingThis = sendingNum === g.num;
@@ -825,7 +864,7 @@ export default function App() {
                   </span>
                   <div className="member-row-actions">
                     {isSent ? (
-                      <span style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 600 }}>✓ Sent</span>
+                      <span style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 700 }}>✓ Sent</span>
                     ) : (
                       <button
                         type="button"
