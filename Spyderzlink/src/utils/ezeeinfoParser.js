@@ -1,22 +1,38 @@
 export function normalizePhone(raw) {
-  const d = String(raw || '').replace(/\D/g, '');
-  if (d.length === 10 && /^[6-9]/.test(d)) return '91' + d;
-  if (d.length === 11 && d[0] === '0' && /^[6-9]/.test(d[1])) return '91' + d.slice(1);
-  if (d.length === 12 && d.slice(0, 2) === '91' && /^[6-9]/.test(d[2])) return d;
+  if (!raw) return null;
+  let digits = String(raw).replace(/\D/g, '');
+  if (digits.startsWith('0091')) digits = digits.slice(2);
+  else if (digits.startsWith('0') && digits.length === 11 && /^[6-9]/.test(digits[1])) {
+    digits = '91' + digits.slice(1);
+  }
+  // Standard 10-digit Indian mobile
+  if (digits.length === 10 && /^[6-9]/.test(digits)) return '91' + digits;
+  // 12-digit Indian mobile with 91 prefix
+  if (digits.length === 12 && digits.startsWith('91') && /^[6-9]/.test(digits[2])) return digits;
+  // Fallback for any 10-digit number
+  if (digits.length === 10) return '91' + digits;
+  // International format (11 to 15 digits)
+  if (digits.length >= 11 && digits.length <= 15) return digits;
   return null;
 }
 
 export function formatPhoneDisplay(num) {
-  if (num && num.length === 12 && num.startsWith('91')) {
-    return '+91 ' + num.slice(2, 7) + ' ' + num.slice(7);
+  if (!num) return '';
+  const d = String(num).replace(/\D/g, '');
+  if (d.length === 12 && d.startsWith('91')) {
+    return '+91 ' + d.slice(2, 7) + ' ' + d.slice(7);
   }
-  return '+' + num;
+  if (d.length === 10) {
+    return '+91 ' + d.slice(0, 5) + ' ' + d.slice(5);
+  }
+  return '+' + d;
 }
 
 export function cleanPassengerName(s) {
   return (s || '')
     .replace(/^[A-Z0-9]{8,}\s+/i, '') // Remove PNR prefix
     .replace(/^\d{4}-\d{2}-\d{2}\s+/, '') // Remove date
+    .replace(/^(?:mr|mrs|ms)\.?\s+/i, '')
     .replace(/[^A-Za-z\s.'-]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -59,26 +75,38 @@ export function parseChartContent(text, defaultSource = 'r') {
     // Ignore header labels
     if (/^(s\.?\s*no|seat\s*no|passenger|pnr|fare|bus type|schedule|landmark|total seats)\b/i.test(line)) return;
 
-    // Search for mobile number (10-12 digits starting with 6-9)
-    const numMatch = line.match(/(?:^|[^\d])((?:\+?91[\s-]*)?0?[6-9]\d{4}[\s-]?\d{5})(?!\d)/);
-    if (!numMatch) {
+    // Search for mobile number (with or without +91, spaces, dashes)
+    const phoneRegex = /(\+?\d[\d\s\-().]{7,}\d)/;
+    const numMatch = line.match(phoneRegex);
+    let num = null;
+    let lineWithoutPhone = line;
+
+    if (numMatch) {
+      num = normalizePhone(numMatch[1]);
+      if (num) {
+        lineWithoutPhone = line.replace(numMatch[1], ' ');
+      }
+    }
+
+    if (!num || driverNums[num]) {
       if (line.length > 10 && !/^(printed by|vehicle|landmark)/i.test(line)) {
         invalid.push(line);
       }
       return;
     }
 
-    const num = normalizePhone(numMatch[1]);
-    if (!num || driverNums[num]) return;
-
     // Booking source detection
-    const isRb = /red\s?bus/i.test(line);
-    const isDirect = /\b(?:direct|counter|offline|walk-?in|cash|office|website)\b/i.test(line);
+    const isRb = /red\s?bus/i.test(lineWithoutPhone);
+    const isDirect = /\b(?:direct|counter|offline|walk-?in|cash|office|website)\b/i.test(lineWithoutPhone);
     const src = isRb ? 'r' : isDirect ? 'd' : defaultSource;
 
-    // Seat pattern (L4, U9, L13, L14W, etc.)
-    const seatMatch = line.match(/\b([LU]\d{1,2}[A-Za-z]?|\d{1,2}[A-Za-z]?)\b/i);
-    const seat = seatMatch ? seatMatch[1].toUpperCase() : '';
+    // Seat pattern (L4, U9, L13, L14W, etc.) - ignore isolated 91 or 0
+    let seat = '';
+    const seatMatch = lineWithoutPhone.match(/\b([LU]\d{1,2}[A-Za-z]?|\d{1,2}[A-Za-z]?)\b/i);
+    if (seatMatch && !/^(91|0)$/.test(seatMatch[1])) {
+      seat = seatMatch[1].toUpperCase();
+      lineWithoutPhone = lineWithoutPhone.replace(seatMatch[0], ' ');
+    }
 
     // Passenger Name detection
     let name = '';
@@ -87,13 +115,16 @@ export function parseChartContent(text, defaultSource = 'r') {
     if (nm) {
       name = cleanPassengerName(nm[1]);
     } else {
-      // Split by tab, comma, semicolon
-      const parts = line.split(/[\t,|;]+/).map(s => s.trim());
-      for (const p of parts) {
-        if (!/\d/.test(p) && p.length >= 3 && !/redbus|direct|counter|sleeper|ac/i.test(p)) {
-          name = cleanPassengerName(p);
-          break;
-        }
+      // Clean remaining line
+      let cleaned = lineWithoutPhone
+        .replace(/red\s?bus|direct|counter|offline|walk-?in|cash|office|website|sleeper|ac/gi, ' ')
+        .replace(/[,;|\-]+/g, ' ')
+        .replace(/[^A-Za-z\s.'-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (cleaned.length >= 2) {
+        name = cleanPassengerName(cleaned);
       }
     }
 

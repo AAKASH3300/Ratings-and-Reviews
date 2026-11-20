@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
-import { parseChartContent, formatPhoneDisplay } from './utils/ezeeinfoParser';
+import { parseChartContent, formatPhoneDisplay, normalizePhone, cleanPassengerName, titleCase } from './utils/ezeeinfoParser';
 
 const KEY = 'spyderzlink-bus-v1';
 const BUS_EMOJIS = ['🚌', '🚍', '⭐', '🌟', '🙏', '✨', '🛣️', '🎫', '🛋️', '❄️', '📍', '💖'];
@@ -24,7 +24,6 @@ export default function App() {
   const [defSrc, setDefSrc] = useState('r');
   const [pasteText, setPasteText] = useState('');
   const [passengers, setPassengers] = useState([]);
-  const [isExample, setIsExample] = useState(true);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [theme, setTheme] = useState('light');
@@ -32,9 +31,16 @@ export default function App() {
   const [dragOver, setDragOver] = useState(false);
   const [delaySeconds, setDelaySeconds] = useState(6);
 
+  // Quick Add State (for 1 or 2 specific passengers)
+  const [quickName, setQuickName] = useState('');
+  const [quickNum, setQuickNum] = useState('');
+  const [quickSrc, setQuickSrc] = useState('r');
+  const [quickSeat, setQuickSeat] = useState('');
+  const [sendingNum, setSendingNum] = useState(null);
+
   // Image Attachment State
   const [attachImage, setAttachImage] = useState(true);
-  const [selectedImage, setSelectedImage] = useState(null); // base64 dataUrl
+  const [selectedImage, setSelectedImage] = useState(null);
 
   // WhatsApp Backend Connection State
   const [waStatus, setWaStatus] = useState('connecting');
@@ -91,7 +97,6 @@ export default function App() {
           if (data.route) setRoute(data.route);
           if (data.date) setDate(data.date);
           setPassengers(data.passengers);
-          setIsExample(false);
         }
       })
       .catch(() => {});
@@ -106,7 +111,7 @@ export default function App() {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
-  // Poll WhatsApp Status
+  // Poll WhatsApp Status & Batch Progress
   useEffect(() => {
     const pollStatus = async () => {
       try {
@@ -146,7 +151,8 @@ export default function App() {
   };
 
   const formatMessage = (p) => {
-    const tpl = (p && p.src === 'd') ? tplD : tplR;
+    const isDirect = (p && p.src === 'd');
+    const tpl = isDirect ? tplD : tplR;
     const name = getDisplayName(p && p.name);
     const seatStr = (p && p.seats && p.seats.length) ? p.seats.join(', ') : '';
     return tpl
@@ -158,7 +164,6 @@ export default function App() {
       .split('{link}').join(googleLink.trim() || '{link}');
   };
 
-  // Insert tag or emoji at cursor in textarea
   const insertText = (str) => {
     const textarea = textareaRef.current;
     if (!textarea) return;
@@ -201,7 +206,6 @@ export default function App() {
               if (data.route) setRoute(data.route);
               if (data.date) setDate(data.date);
               setPassengers(data.passengers);
-              setIsExample(false);
               showToast(`Loaded ${data.passengers.length} passengers (${data.totalSeats} seats) from PDF!`);
             } else {
               alert('Could not parse PDF: ' + (data.error || 'Unknown error'));
@@ -237,14 +241,109 @@ export default function App() {
   const handleBuildList = (textToParse = pasteText) => {
     if (!textToParse.trim()) return showToast('Paste chart rows or upload a file first.');
     const res = parseChartContent(textToParse, defSrc);
-    if (!res.rows.length) return showToast('No valid passenger phone numbers detected.');
+    if (!res.rows.length) return alert('No valid passenger phone numbers detected. Enter a 10-digit number like 9876543210.');
     if (res.detectedRoute) setRoute(res.detectedRoute);
     if (res.detectedDate) setDate(res.detectedDate);
     setPassengers(res.rows);
-    setIsExample(false);
     setFilter('all');
     setPasteText('');
     showToast(`Loaded ${res.rows.length} passengers!`);
+  };
+
+  // Quick Add 1 or 2 Passengers to List
+  const handleAddQuickPassenger = () => {
+    if (!quickNum.trim()) return showToast('Please enter a mobile number.');
+    const validNum = normalizePhone(quickNum);
+    if (!validNum) {
+      return alert('Invalid mobile number format. Enter a 10-digit number (e.g. 9876543210 or +91 98765 43210).');
+    }
+    const cleanName = cleanPassengerName(quickName) || 'Sir/Madam';
+    const newPassenger = {
+      name: titleCase(cleanName),
+      num: validNum,
+      seats: quickSeat.trim() ? [quickSeat.trim().toUpperCase()] : [],
+      src: quickSrc
+    };
+    setPassengers(prev => {
+      const filtered = prev.filter(p => p.num !== validNum);
+      return [newPassenger, ...filtered];
+    });
+    setQuickName('');
+    setQuickNum('');
+    setQuickSeat('');
+    showToast(`Added ${newPassenger.name} to passenger list!`);
+  };
+
+  // Send Single WhatsApp Review Message Instantly (for 1 or 2 members)
+  const handleSendSingle = async (passengerToSend) => {
+    if (waStatus !== 'connected') {
+      setShowQrModal(true);
+      return;
+    }
+    if (!passengerToSend || !passengerToSend.num) return;
+    if (passengerToSend.src === 'd' && !googleLink.trim()) {
+      return alert('Please enter your Google Review link for Direct passengers.');
+    }
+
+    setSendingNum(passengerToSend.num);
+    try {
+      const res = await fetch('/api/send-single', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipient: {
+            num: passengerToSend.num,
+            name: getDisplayName(passengerToSend.name),
+            seats: passengerToSend.seats || [],
+            src: passengerToSend.src
+          },
+          message: formatMessage(passengerToSend),
+          imageBase64: attachImage ? selectedImage : null
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert('Failed to send: ' + (data.error || 'Unknown error'));
+      } else {
+        const channelLabel = passengerToSend.src === 'd' ? 'Direct' : 'redBus';
+        showToast(`✓ Sent ${channelLabel} reminder to ${passengerToSend.name}!`);
+        if (data.receipt) {
+          setBatchProgress(prev => ({
+            ...prev,
+            sentList: [data.receipt, ...(prev.sentList || []).filter(s => s.num !== passengerToSend.num)]
+          }));
+        }
+      }
+    } catch (e) {
+      alert('Error sending: ' + e.message);
+    } finally {
+      setSendingNum(null);
+    }
+  };
+
+  // Instant Send Directly from Quick Add Form
+  const handleSendQuickNow = async () => {
+    const validNum = normalizePhone(quickNum);
+    if (!validNum) {
+      return alert('Please enter a valid 10-digit mobile number (e.g. 9876543210).');
+    }
+    const cleanName = cleanPassengerName(quickName) || 'Sir/Madam';
+    const passObj = {
+      name: titleCase(cleanName),
+      num: validNum,
+      seats: quickSeat.trim() ? [quickSeat.trim().toUpperCase()] : [],
+      src: quickSrc
+    };
+    setPassengers(prev => {
+      const filtered = prev.filter(p => p.num !== validNum);
+      return [passObj, ...filtered];
+    });
+    await handleSendSingle(passObj);
+  };
+
+  const handleRemovePassenger = (numToRemove) => {
+    setPassengers(prev => prev.filter(p => p.num !== numToRemove));
+    showToast('Removed from list.');
   };
 
   // 1-Click Send to All
@@ -305,6 +404,8 @@ export default function App() {
       (p.seats || []).join(' ').toLowerCase().includes(q)
     );
   }
+
+  const normalizedQuick = normalizePhone(quickNum);
 
   return (
     <div className="wrap">
@@ -381,219 +482,346 @@ export default function App() {
         )}
       </section>
 
-      {/* Step 1: Upload Chart */}
+      {/* Step 1: Add Passengers (Split Layout: Quick Add on Left, Upload/Paste on Right) */}
       <section className="card">
         <div className="head">
           <p className="eyebrow">Step 1</p>
-          <h2>Upload EzeeInfo Passenger Chart</h2>
+          <h2>Add Passengers (redBus & Direct)</h2>
         </div>
 
-        <div
-          className={`dropzone ${dragOver ? 'dragover' : ''}`}
-          onClick={() => fileInputRef.current && fileInputRef.current.click()}
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragOver(false);
-            if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFileUpload(e.dataTransfer.files[0]);
-          }}
-        >
-          <span className="dropzone-icon">📥</span>
-          <span className="dropzone-text">Drop EzeeInfo PDF (Trip Chart.pdf), Excel (.xlsx), or CSV here</span>
-          <span className="dropzone-sub">or click to browse from computer</span>
-          <input
-            type="file"
-            ref={fileInputRef}
-            accept=".pdf,.xlsx,.xls,.csv,.tsv,.txt"
-            style={{ display: 'none' }}
-            onChange={(e) => { if (e.target.files && e.target.files[0]) handleFileUpload(e.target.files[0]); }}
-          />
-        </div>
+        <div className="step1-split">
+          {/* Left: Quick Add for 1 or 2 Members */}
+          <div className="quick-add-box">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <strong style={{ fontSize: 14 }}>⚡ Quick Type & Send (1 or 2 Members)</strong>
+              <span style={{ fontSize: 11, background: 'var(--accent-soft)', color: 'var(--accent)', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>Individual</span>
+            </div>
 
-        <div className="row-inline" style={{ justifyContent: 'space-between' }}>
-          <div className="row-inline">
-            <span style={{ fontSize: 13, color: 'var(--muted)' }}>Default Source:</span>
-            <select
-              value={defSrc}
-              onChange={(e) => setDefSrc(e.target.value)}
-              style={{ width: 'auto', minHeight: 34, padding: '2px 8px', fontSize: 13 }}
-            >
-              <option value="r">redBus</option>
-              <option value="d">Direct</option>
-            </select>
+            <div className="field">
+              <label>Passenger Name</label>
+              <input
+                type="text"
+                value={quickName}
+                onChange={(e) => setQuickName(e.target.value)}
+                placeholder="e.g. Ramesh / Priya"
+              />
+            </div>
+
+            <div className="field">
+              <label>Mobile Number</label>
+              <input
+                type="text"
+                value={quickNum}
+                onChange={(e) => setQuickNum(e.target.value)}
+                placeholder="e.g. 9876543210 or +91 98765 43210"
+              />
+              {quickNum.trim() ? (
+                normalizedQuick ? (
+                  <div className="phone-validation-hint valid">
+                    ✓ Valid Number: {formatPhoneDisplay(normalizedQuick)}
+                  </div>
+                ) : (
+                  <div className="phone-validation-hint invalid">
+                    ⚠️ Enter a 10-digit number (e.g. 9876543210)
+                  </div>
+                )
+              ) : null}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div className="field">
+                <label>Booking Channel</label>
+                <select value={quickSrc} onChange={(e) => setQuickSrc(e.target.value)}>
+                  <option value="r">redBus</option>
+                  <option value="d">Direct</option>
+                </select>
+              </div>
+              <div className="field">
+                <label>Seat No. (Optional)</label>
+                <input
+                  type="text"
+                  value={quickSeat}
+                  onChange={(e) => setQuickSeat(e.target.value)}
+                  placeholder="e.g. L4, U2"
+                />
+              </div>
+            </div>
+
+            <div className="row-inline" style={{ marginTop: 4 }}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-small"
+                onClick={handleAddQuickPassenger}
+                style={{ flex: 1 }}
+              >
+                + Add to List
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-small"
+                onClick={handleSendQuickNow}
+                disabled={!normalizedQuick || sendingNum === normalizedQuick}
+                style={{ flex: 1 }}
+              >
+                {sendingNum === normalizedQuick ? 'Sending...' : '⚡ Send Now'}
+              </button>
+            </div>
+
+            {/* Format Note Callout */}
+            <div className="format-note">
+              <div className="format-note-title">💡 How to enter Mobile Number:</div>
+              <ul>
+                <li>Enter any 10-digit mobile number (e.g. <code>9876543210</code> or <code>+91 98765 43210</code>).</li>
+                <li>Country code <code>+91</code> is automatically added.</li>
+                <li>Ideal for sending redBus/Direct reminders to 1 or 2 passengers separately!</li>
+              </ul>
+            </div>
           </div>
-          <button
-            type="button"
-            className="btn btn-ghost btn-small"
-            style={{ fontWeight: 600, color: 'var(--accent)', borderColor: 'var(--accent)' }}
-            onClick={async () => {
-              try {
-                const res = await fetch('/api/upload-chart-pdf', { method: 'POST' });
-                const data = await res.json();
-                if (data.success && data.passengers) {
-                  if (data.route) setRoute(data.route);
-                  if (data.date) setDate(data.date);
-                  setPassengers(data.passengers);
-                  setIsExample(false);
-                  showToast(`Loaded yesterday's chart: ${data.passengers.length} passengers (${data.totalSeats} seats)!`);
-                }
-              } catch (e) {
-                alert('Error: ' + e.message);
-              }
-            }}
-          >
-            ⚡ Load Yesterday's Chart (18 Nov)
-          </button>
+
+          {/* Right: Upload File or Paste Rows */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div
+              className={`dropzone ${dragOver ? 'dragover' : ''}`}
+              onClick={() => fileInputRef.current && fileInputRef.current.click()}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+                if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFileUpload(e.dataTransfer.files[0]);
+              }}
+            >
+              <span className="dropzone-icon">📥</span>
+              <span className="dropzone-text">Drop EzeeInfo PDF, Excel (.xlsx), or CSV here</span>
+              <span className="dropzone-sub">or click to browse from computer</span>
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept=".pdf,.xlsx,.xls,.csv,.tsv,.txt"
+                style={{ display: 'none' }}
+                onChange={(e) => { if (e.target.files && e.target.files[0]) handleFileUpload(e.target.files[0]); }}
+              />
+            </div>
+
+            <div className="field">
+              <label>Or Paste Passenger Rows (Name, Mobile, Channel, Seat)</label>
+              <textarea
+                rows={3}
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                placeholder="Ramesh, 9876543210, redBus, L4&#10;Divya, 9840012345, redBus, U1&#10;Karthik, 9791698889, Direct"
+              />
+            </div>
+
+            <div className="row-inline" style={{ justifyContent: 'space-between' }}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-small"
+                onClick={async () => {
+                  try {
+                    const res = await fetch('/api/upload-chart-pdf', { method: 'POST' });
+                    const data = await res.json();
+                    if (data.success && data.passengers) {
+                      if (data.route) setRoute(data.route);
+                      if (data.date) setDate(data.date);
+                      setPassengers(data.passengers);
+                      showToast(`Loaded yesterday's chart: ${data.passengers.length} passengers!`);
+                    }
+                  } catch (e) {
+                    alert('Error: ' + e.message);
+                  }
+                }}
+              >
+                ⚡ Load Yesterday's Chart
+              </button>
+              <button type="button" className="btn btn-primary btn-small" onClick={() => handleBuildList()}>
+                Parse Passenger Rows
+              </button>
+            </div>
+          </div>
         </div>
       </section>
 
-      {/* Step 2: Message, Emojis & Image Attachment */}
+      {/* Step 2: Message & Live Preview (2-Column Split: Inputs on Left, Preview on Right) */}
       <section className="card">
         <div className="head">
           <p className="eyebrow">Step 2</p>
-          <h2>Customize Message, Emojis & Bus Photo</h2>
+          <h2>Customize Message & Live WhatsApp Preview</h2>
         </div>
 
-        {/* Channel Switch */}
-        <div className="tabs">
-          <button
-            type="button"
-            className={`tab ${activeTab === 'r' ? 'active' : ''}`}
-            onClick={() => setActiveTab('r')}
-          >
-            redBus Passengers
-          </button>
-          <button
-            type="button"
-            className={`tab ${activeTab === 'd' ? 'active' : ''}`}
-            onClick={() => setActiveTab('d')}
-          >
-            Direct Bookings (Google Review)
-          </button>
-        </div>
-
-        {activeTab === 'd' && (
-          <div className="field">
-            <label>Google Review Link</label>
-            <input
-              type="url"
-              value={googleLink}
-              onChange={(e) => setGoogleLink(e.target.value)}
-              placeholder="https://g.page/r/your-bus-service/review"
-            />
-          </div>
-        )}
-
-        {/* Message Editor */}
-        <div className="field">
-          <div className="row-inline" style={{ justifyContent: 'space-between' }}>
-            <span className="label">Message Text</span>
-            <div className="row-inline">
+        <div className="step2-split">
+          {/* Left Column: Message Controls */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* Channel Switch */}
+            <div className="tabs">
               <button
                 type="button"
-                className="btn btn-ghost btn-small"
-                onClick={() => activeTab === 'd' ? setTplD(D_EN) : setTplR(R_EN)}
+                className={`tab ${activeTab === 'r' ? 'active' : ''}`}
+                onClick={() => setActiveTab('r')}
               >
-                English
+                redBus Passengers
               </button>
               <button
                 type="button"
-                className="btn btn-ghost btn-small"
-                onClick={() => activeTab === 'd' ? setTplD(D_TA) : setTplR(R_TA)}
+                className={`tab ${activeTab === 'd' ? 'active' : ''}`}
+                onClick={() => setActiveTab('d')}
               >
-                தமிழ்
+                Direct Bookings (Google Review)
               </button>
             </div>
-          </div>
 
-          <textarea
-            ref={textareaRef}
-            rows={4}
-            value={activeTab === 'd' ? tplD : tplR}
-            onChange={(e) => activeTab === 'd' ? setTplD(e.target.value) : setTplR(e.target.value)}
-          />
-
-          {/* Emoji Toolbar */}
-          <div className="row-inline" style={{ gap: 4 }}>
-            <span className="hint" style={{ alignSelf: 'center', marginRight: 4 }}>Add Emoji:</span>
-            {BUS_EMOJIS.map(em => (
-              <button key={em} type="button" className="emoji-btn" onClick={() => insertText(' ' + em)}>
-                {em}
-              </button>
-            ))}
-          </div>
-
-          {/* Dynamic Tag Buttons */}
-          <div className="row-inline" style={{ gap: 4 }}>
-            <span className="hint" style={{ alignSelf: 'center', marginRight: 4 }}>Insert Tag:</span>
-            {['{name}', '{seat}', '{bus}', '{route}', '{date}'].map(tag => (
-              <button key={tag} type="button" className="tag-btn" onClick={() => insertText(tag)}>
-                + {tag}
-              </button>
-            ))}
             {activeTab === 'd' && (
-              <button type="button" className="tag-btn" onClick={() => insertText('{link}')}>
-                + {'{link}'}
-              </button>
+              <div className="field">
+                <label>Google Review Link</label>
+                <input
+                  type="url"
+                  value={googleLink}
+                  onChange={(e) => setGoogleLink(e.target.value)}
+                  placeholder="https://g.page/r/your-bus-service/review"
+                />
+              </div>
             )}
-          </div>
-        </div>
 
-        {/* Image Attachment Box */}
-        <div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 14, background: 'var(--bg)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={attachImage}
-                onChange={(e) => setAttachImage(e.target.checked)}
+            {/* Message Editor */}
+            <div className="field">
+              <div className="row-inline" style={{ justifyContent: 'space-between' }}>
+                <span className="label">Message Text ({activeTab === 'r' ? 'redBus' : 'Direct'})</span>
+                <div className="row-inline">
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-small"
+                    onClick={() => activeTab === 'd' ? setTplD(D_EN) : setTplR(R_EN)}
+                  >
+                    English
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-small"
+                    onClick={() => activeTab === 'd' ? setTplD(D_TA) : setTplR(R_TA)}
+                  >
+                    தமிழ்
+                  </button>
+                </div>
+              </div>
+
+              <textarea
+                ref={textareaRef}
+                rows={5}
+                value={activeTab === 'd' ? tplD : tplR}
+                onChange={(e) => activeTab === 'd' ? setTplD(e.target.value) : setTplR(e.target.value)}
               />
-              <strong>Attach Bus Brochure / Photo with WhatsApp Message</strong>
-            </label>
-            <button
-              type="button"
-              className="btn btn-ghost btn-small"
-              onClick={() => imgInputRef.current && imgInputRef.current.click()}
-            >
-              Upload Custom Image
-            </button>
-            <input
-              type="file"
-              ref={imgInputRef}
-              accept="image/*"
-              style={{ display: 'none' }}
-              onChange={(e) => { if (e.target.files && e.target.files[0]) handleCustomImageUpload(e.target.files[0]); }}
-            />
-          </div>
 
-          {attachImage && selectedImage && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <img src={selectedImage} alt="Bus Brochure Thumbnail" style={{ width: 120, height: 75, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--line)' }} />
-              <div style={{ fontSize: 13, color: 'var(--muted)' }}>
-                Passengers will receive this image in WhatsApp with your review reminder as the caption!
+              {/* Emoji Toolbar */}
+              <div className="row-inline" style={{ gap: 4 }}>
+                <span className="hint" style={{ alignSelf: 'center', marginRight: 4 }}>Add Emoji:</span>
+                {BUS_EMOJIS.map(em => (
+                  <button key={em} type="button" className="emoji-btn" onClick={() => insertText(' ' + em)}>
+                    {em}
+                  </button>
+                ))}
+              </div>
+
+              {/* Dynamic Tag Buttons */}
+              <div className="row-inline" style={{ gap: 4 }}>
+                <span className="hint" style={{ alignSelf: 'center', marginRight: 4 }}>Insert Tag:</span>
+                {['{name}', '{seat}', '{bus}', '{route}', '{date}'].map(tag => (
+                  <button key={tag} type="button" className="tag-btn" onClick={() => insertText(tag)}>
+                    + {tag}
+                  </button>
+                ))}
+                {activeTab === 'd' && (
+                  <button key="{link}" type="button" className="tag-btn" onClick={() => insertText('{link}')}>
+                    + {'{link}'}
+                  </button>
+                )}
               </div>
             </div>
-          )}
-        </div>
 
-        {/* WhatsApp Preview Bubble */}
-        <div className="bubble-wrap">
-          <span className="label">Live WhatsApp Preview</span>
-          <div className="bubble">
-            {attachImage && selectedImage && (
-              <img src={selectedImage} alt="Preview attachment" style={{ maxWidth: '100%', maxHeight: 200, borderRadius: 8, marginBottom: 8, display: 'block', objectFit: 'cover' }} />
-            )}
-            <div>{formatMessage(passengers[0] || { name: 'Harikrishnan', num: '917708155207', seats: ['L1'], src: activeTab })}</div>
+            {/* Image Attachment Box */}
+            <div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 14, background: 'var(--bg)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={attachImage}
+                    onChange={(e) => setAttachImage(e.target.checked)}
+                  />
+                  <strong>Attach Bus Brochure / Photo with WhatsApp Message</strong>
+                </label>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-small"
+                  onClick={() => imgInputRef.current && imgInputRef.current.click()}
+                >
+                  Upload Image
+                </button>
+                <input
+                  type="file"
+                  ref={imgInputRef}
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={(e) => { if (e.target.files && e.target.files[0]) handleCustomImageUpload(e.target.files[0]); }}
+                />
+              </div>
+
+              {attachImage && selectedImage && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <img src={selectedImage} alt="Bus Brochure Thumbnail" style={{ width: 110, height: 70, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--line)' }} />
+                  <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+                    Passengers receive this brochure with your review reminder as the caption!
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right Column: Sticky Live WhatsApp Preview */}
+          <div className="preview-sticky">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span className="label" style={{ fontSize: 13, fontWeight: 700 }}>💬 Live WhatsApp Visualization</span>
+              <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}>Real-time updates</span>
+            </div>
+
+            <div className="wa-phone-card">
+              <div className="wa-phone-header">
+                <div className="wa-phone-header-left">
+                  <img src="/logo.jpg" alt="Avatar" className="wa-avatar" style={{ objectFit: 'contain', background: '#000' }} />
+                  <div>
+                    <div className="wa-contact-name">{bus}</div>
+                    <div className="wa-contact-status">online</div>
+                  </div>
+                </div>
+                <div style={{ fontSize: 16, opacity: 0.85 }}>📞 📹 ⫶</div>
+              </div>
+
+              <div className="wa-chat-body">
+                <div className="wa-chat-bubble">
+                  {attachImage && selectedImage && (
+                    <img src={selectedImage} alt="Preview Attachment" className="wa-bubble-img" />
+                  )}
+                  <div>
+                    {formatMessage(passengers[0] || { name: 'Harikrishnan', num: '917708155207', seats: ['L1'], src: activeTab })}
+                  </div>
+                  <div className="wa-time-meta">
+                    <span>10:45 AM</span>
+                    <span className="wa-check">✓✓</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ fontSize: 12, color: 'var(--muted)', background: 'var(--surface)', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--line)', lineHeight: 1.4 }}>
+              💡 <strong>Instant Preview:</strong> Switching between redBus and Direct tabs or typing new text on the left updates this preview immediately.
+            </div>
           </div>
         </div>
       </section>
 
-      {/* Step 3: Send to All */}
+      {/* Step 3: Send to All & Passenger List */}
       <section className="card" id="step3">
         <div className="head">
           <p className="eyebrow">Step 3</p>
-          <h2>1-Click Delivery to All Passengers</h2>
+          <h2>Delivery to All Passengers ({total} Total)</h2>
         </div>
 
         <div style={{ padding: 18, border: '2px solid var(--accent)', borderRadius: 14, background: 'var(--surface)', display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -603,7 +831,7 @@ export default function App() {
                 {isSending ? `Sending to passengers (${batchProgress.currentIndex} of ${total})...` : `Ready to send to ${total} passengers`}
               </div>
               <div style={{ fontSize: 13, color: 'var(--muted)' }}>
-                {attachImage ? 'Sending photo with formatted text caption & emojis.' : 'Sending text message with emojis.'}
+                {attachImage ? 'Sending brochure photo with formatted text caption & emojis.' : 'Sending text message with emojis.'}
               </div>
             </div>
 
@@ -667,7 +895,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Passenger List */}
+        {/* Passenger List with Individual Send */}
         <div style={{ marginTop: 14 }}>
           <div className="toolbar">
             <div className="tabs">
@@ -693,6 +921,7 @@ export default function App() {
           <ul className="list" style={{ marginTop: 10 }}>
             {displayList.map(p => {
               const isSent = sentNumSet.has(p.num);
+              const isSendingThis = sendingNum === p.num;
               return (
                 <li key={p.num} className={`row ${isSent ? 'done' : ''}`}>
                   <div className="who">
@@ -707,11 +936,29 @@ export default function App() {
                   <span className={`chip ${p.src === 'd' ? 'chip-d' : 'chip-r'}`}>
                     {p.src === 'd' ? 'Direct' : 'redBus'}
                   </span>
-                  {isSent ? (
-                    <span style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 600 }}>✓ Sent</span>
-                  ) : (
-                    <span style={{ fontSize: 13, color: 'var(--muted)' }}>Pending</span>
-                  )}
+                  <div className="member-row-actions">
+                    {isSent ? (
+                      <span style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 600 }}>✓ Sent</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn-send-single"
+                        onClick={() => handleSendSingle(p)}
+                        disabled={isSendingThis || waStatus !== 'connected'}
+                        title={`Send ${p.src === 'd' ? 'Direct' : 'redBus'} review reminder now`}
+                      >
+                        {isSendingThis ? 'Sending...' : '⚡ Send'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="btn-remove-row"
+                      onClick={() => handleRemovePassenger(p.num)}
+                      title="Remove from list"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </li>
               );
             })}

@@ -1,19 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
-import { parseHotelGuests, formatPhoneDisplay } from './utils/hotelParser';
+import { parseHotelGuests, formatPhoneDisplay, normalizePhone, cleanGuestName, titleCase } from './utils/hotelParser';
 
 const KEY = 'le-royal-suite-v1';
 const HOTEL_EMOJIS = ['🏨', '🛏️', '⭐', '🌟', '🙏', '✨', '🛎️', '☕', '🍽️', '📍', '💖', '🌸'];
 
 const HOTEL_DEMO = [
-  { name: 'Rajesh Kumar', num: '919840012345', rooms: ['204'], src: 'Direct' },
-  { name: 'Dr. Anitha S', num: '919791698889', rooms: ['Suite 301'], src: 'Booking.com' },
-  { name: 'Praveen Balaji', num: '918802916696', rooms: ['102', '103'], src: 'Direct' },
-  { name: 'Siddharth R', num: '919440110078', rooms: ['Deluxe 208'], src: 'MakeMyTrip' }
+  { name: 'Rajesh Kumar', num: '919840012345', src: 'Direct' },
+  { name: 'Dr. Anitha S', num: '919791698889', src: 'Booking.com' },
+  { name: 'Praveen Balaji', num: '918802916696', src: 'Direct' },
+  { name: 'Siddharth R', num: '919440110078', src: 'MakeMyTrip' }
 ];
 
-const H_EN = "Dear {name}, thank you for staying with us at {hotel} (Room {room})! 🏨✨ We hope you had a pleasant and relaxing stay. If you enjoyed our hospitality, could you please take a moment to share your experience on our Google page? ⭐⭐⭐⭐⭐ Your review helps our team grow: {link} - Warm regards, {hotel} Team 🙏";
-const H_TA = "வணக்கம் {name}, {hotel}-ல் (Room {room}) தங்கியிருந்தமைக்கு மிக்க நன்றி! 🏨✨ உங்கள் தங்குதல் இனிமையாகவும் திருப்திகரமாகவும் அமைந்திருக்கும் என நம்புகிறோம். எங்கள் சேவை பிடித்திருந்தால், Google-ல் எங்களுக்கு 5-star review கொடுத்து வாழ்த்துங்கள் ⭐⭐⭐⭐⭐: {link} - அன்புடன், {hotel} நிர்வாகம் 🙏";
+const H_EN = "Dear {name}, thank you for staying with us at {hotel}! 🏨✨ We hope you had a pleasant and relaxing stay. If you enjoyed our hospitality, could you please take a moment to share your experience on our Google page? ⭐⭐⭐⭐⭐ Your review helps our team grow: {link} - Warm regards, {hotel} Team 🙏";
+const H_TA = "வணக்கம் {name}, {hotel}-ல் தங்கியிருந்தமைக்கு மிக்க நன்றி! 🏨✨ உங்கள் தங்குதல் இனிமையாகவும் திருப்திகரமாகவும் அமைந்திருக்கும் என நம்புகிறோம். எங்கள் சேவை பிடித்திருந்தால், Google-ல் எங்களுக்கு 5-star review கொடுத்து வாழ்த்துங்கள் ⭐⭐⭐⭐⭐: {link} - அன்புடன், {hotel} நிர்வாகம் 🙏";
 
 export default function App() {
   const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
@@ -31,6 +31,12 @@ export default function App() {
   const [toastMsg, setToastMsg] = useState('');
   const [dragOver, setDragOver] = useState(false);
   const [delaySeconds, setDelaySeconds] = useState(6);
+
+  // Quick Add State (for 1 or 2 specific guests)
+  const [quickName, setQuickName] = useState('');
+  const [quickNum, setQuickNum] = useState('');
+  const [quickSrc, setQuickSrc] = useState('Direct');
+  const [sendingNum, setSendingNum] = useState(null);
 
   // Image Attachment State
   const [attachImage, setAttachImage] = useState(true);
@@ -85,7 +91,7 @@ export default function App() {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
-  // Poll WhatsApp Status
+  // Poll WhatsApp Status & Batch Progress
   useEffect(() => {
     const pollStatus = async () => {
       try {
@@ -126,11 +132,9 @@ export default function App() {
 
   const formatMessage = (g) => {
     const name = getDisplayName(g && g.name);
-    const roomStr = (g && g.rooms && g.rooms.length) ? g.rooms.join(', ') : 'your room';
     return tpl
       .split('{name}').join(name)
       .split('{hotel}').join(hotel || 'Le Royal Suite')
-      .split('{room}').join(roomStr)
       .split('{date}').join(date || 'yesterday')
       .split('{link}').join(googleLink.trim() || '{link}');
   };
@@ -185,14 +189,106 @@ export default function App() {
   const handleBuildList = (textToParse = pasteText) => {
     if (!textToParse.trim()) return showToast('Paste guest rows or upload a file first.');
     const res = parseHotelGuests(textToParse);
-    if (!res.rows.length) return showToast('No valid guest phone numbers detected.');
+    if (!res.rows.length) return alert('No valid guest phone numbers detected. Enter a 10-digit number like 9840012345 (no room number needed).');
     setGuests(res.rows);
     setFilter('all');
     setPasteText('');
     showToast(`Loaded ${res.rows.length} hotel guests!`);
   };
 
-  // 1-Click Send to All
+  // Quick Add 1 or 2 Guests to List
+  const handleAddQuickGuest = () => {
+    if (!quickNum.trim()) return showToast('Please enter a mobile number.');
+    const validNum = normalizePhone(quickNum);
+    if (!validNum) {
+      return alert('Invalid mobile number format. Enter a 10-digit number (e.g. 9840012345 or +91 98400 12345).');
+    }
+    const cleanName = cleanGuestName(quickName) || 'Guest';
+    const newGuest = {
+      name: titleCase(cleanName),
+      num: validNum,
+      rooms: [],
+      src: quickSrc
+    };
+    setGuests(prev => {
+      const filtered = prev.filter(g => g.num !== validNum);
+      return [newGuest, ...filtered];
+    });
+    setQuickName('');
+    setQuickNum('');
+    showToast(`Added ${newGuest.name} to guest list!`);
+  };
+
+  // Send Single WhatsApp Review Message Instantly
+  const handleSendSingle = async (guestToSend) => {
+    if (waStatus !== 'connected') {
+      setShowQrModal(true);
+      return;
+    }
+    if (!guestToSend || !guestToSend.num) return;
+    if (!googleLink.trim()) return alert('Please enter your Google Review link.');
+
+    setSendingNum(guestToSend.num);
+    try {
+      const res = await fetch('/api/send-single', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipient: {
+            num: guestToSend.num,
+            name: getDisplayName(guestToSend.name),
+            src: guestToSend.src
+          },
+          message: formatMessage(guestToSend),
+          imageBase64: attachImage ? selectedImage : null
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert('Failed to send: ' + (data.error || 'Unknown error'));
+      } else {
+        showToast(`✓ Review request sent to ${guestToSend.name}!`);
+        // Refresh batch progress to reflect sent state
+        if (data.receipt) {
+          setBatchProgress(prev => ({
+            ...prev,
+            sentList: [data.receipt, ...(prev.sentList || []).filter(s => s.num !== guestToSend.num)]
+          }));
+        }
+      }
+    } catch (e) {
+      alert('Error sending: ' + e.message);
+    } finally {
+      setSendingNum(null);
+    }
+  };
+
+  // Instant Send Directly from Quick Add Form
+  const handleSendQuickNow = async () => {
+    const validNum = normalizePhone(quickNum);
+    if (!validNum) {
+      return alert('Please enter a valid 10-digit mobile number (e.g. 9840012345).');
+    }
+    const cleanName = cleanGuestName(quickName) || 'Guest';
+    const guestObj = {
+      name: titleCase(cleanName),
+      num: validNum,
+      rooms: [],
+      src: quickSrc
+    };
+    setGuests(prev => {
+      const filtered = prev.filter(g => g.num !== validNum);
+      return [guestObj, ...filtered];
+    });
+    await handleSendSingle(guestObj);
+  };
+
+  const handleRemoveGuest = (numToRemove) => {
+    setGuests(prev => prev.filter(g => g.num !== numToRemove));
+    showToast('Removed from list.');
+  };
+
+  // 1-Click Send to All Guests
   const handleSendAll = async () => {
     if (waStatus !== 'connected') {
       setShowQrModal(true);
@@ -204,7 +300,7 @@ export default function App() {
     const payloadGuests = guests.map(g => ({
       num: g.num,
       name: getDisplayName(g.name),
-      rooms: g.rooms,
+      rooms: g.rooms || [],
       src: g.src,
       message: formatMessage(g)
     }));
@@ -248,9 +344,11 @@ export default function App() {
     displayList = displayList.filter(g =>
       g.name.toLowerCase().includes(q) ||
       g.num.includes(q) ||
-      (g.rooms || []).join(' ').toLowerCase().includes(q)
+      (g.src || '').toLowerCase().includes(q)
     );
   }
+
+  const normalizedQuick = normalizePhone(quickNum);
 
   return (
     <div className="wrap">
@@ -260,7 +358,7 @@ export default function App() {
           <img
             src="/logo.jpg"
             alt="Le Royal Suite Logo"
-            style={{ width: 52, height: 52, objectFit: 'cover', borderRadius: 10, border: '1.5px solid var(--accent)', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}
+            style={{ width: 54, height: 54, objectFit: 'cover', borderRadius: 10, border: '1.5px solid var(--accent)', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}
           />
           <div>
             <span className="hotel-tag">🏨 {hotel} · Luxury Stay</span>
@@ -327,173 +425,291 @@ export default function App() {
         )}
       </section>
 
-      {/* Step 1: Upload Guest List */}
+      {/* Step 1: Add Guests (Split Layout: Quick Add on Left, File/Paste on Right) */}
       <section className="card">
         <div className="head">
           <p className="eyebrow">Step 1</p>
-          <h2>Upload Hotel Guest Check-out List</h2>
+          <h2>Add Hotel Guests (No Room No. Needed)</h2>
         </div>
 
-        <div
-          className={`dropzone ${dragOver ? 'dragover' : ''}`}
-          onClick={() => fileInputRef.current && fileInputRef.current.click()}
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragOver(false);
-            if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFileUpload(e.dataTransfer.files[0]);
-          }}
-        >
-          <span className="dropzone-icon">📥</span>
-          <span className="dropzone-text">Drop Hotel Guest Excel (.xlsx), CSV, or PMS export here</span>
-          <span className="dropzone-sub">or click to browse from computer</span>
-          <input
-            type="file"
-            ref={fileInputRef}
-            accept=".xlsx,.xls,.csv,.tsv,.txt"
-            style={{ display: 'none' }}
-            onChange={(e) => { if (e.target.files && e.target.files[0]) handleFileUpload(e.target.files[0]); }}
-          />
-        </div>
+        <div className="step1-split">
+          {/* Left: Quick Add for 1 or 2 Members */}
+          <div className="quick-add-box">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <strong style={{ fontSize: 14 }}>⚡ Quick Type & Send (1 or 2 Guests)</strong>
+              <span style={{ fontSize: 11, background: 'var(--accent-soft)', color: 'var(--accent)', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>Individual</span>
+            </div>
 
-        <div className="field">
-          <label>Or Paste Guest Rows (Room No, Guest Name, Mobile Number, Source)</label>
-          <textarea
-            rows={3}
-            value={pasteText}
-            onChange={(e) => setPasteText(e.target.value)}
-            placeholder="Room 102, Rajesh Kumar, 9840012345, Direct&#10;Suite 301, Dr. Anitha S, 9791698889, Booking.com&#10;204, Praveen Balaji, 8802916696, MakeMyTrip"
-          />
-        </div>
+            <div className="field">
+              <label>Guest Name</label>
+              <input
+                type="text"
+                value={quickName}
+                onChange={(e) => setQuickName(e.target.value)}
+                placeholder="e.g. Rajesh Kumar"
+              />
+            </div>
 
-        <div className="row-inline" style={{ justifyContent: 'space-between' }}>
-          <button
-            type="button"
-            className="btn btn-ghost btn-small"
-            onClick={() => { setGuests(HOTEL_DEMO); showToast('Loaded sample guest list'); }}
-          >
-            Load Demo Guests
-          </button>
-          <button type="button" className="btn btn-primary btn-small" onClick={() => handleBuildList()}>
-            Build Guest List
-          </button>
+            <div className="field">
+              <label>Mobile Number</label>
+              <input
+                type="text"
+                value={quickNum}
+                onChange={(e) => setQuickNum(e.target.value)}
+                placeholder="e.g. 9840012345 or +91 98400 12345"
+              />
+              {quickNum.trim() ? (
+                normalizedQuick ? (
+                  <div className="phone-validation-hint valid">
+                    ✓ Valid Number: {formatPhoneDisplay(normalizedQuick)}
+                  </div>
+                ) : (
+                  <div className="phone-validation-hint invalid">
+                    ⚠️ Enter a 10-digit number (e.g. 9840012345)
+                  </div>
+                )
+              ) : null}
+            </div>
+
+            <div className="field">
+              <label>Booking Source</label>
+              <select value={quickSrc} onChange={(e) => setQuickSrc(e.target.value)}>
+                <option value="Direct">Direct / Walk-in</option>
+                <option value="Booking.com">Booking.com</option>
+                <option value="MakeMyTrip">MakeMyTrip</option>
+                <option value="Agoda">Agoda</option>
+              </select>
+            </div>
+
+            <div className="row-inline" style={{ marginTop: 4 }}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-small"
+                onClick={handleAddQuickGuest}
+                style={{ flex: 1 }}
+              >
+                + Add to List
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-small"
+                onClick={handleSendQuickNow}
+                disabled={!normalizedQuick || sendingNum === normalizedQuick}
+                style={{ flex: 1 }}
+              >
+                {sendingNum === normalizedQuick ? 'Sending...' : '⚡ Send Now'}
+              </button>
+            </div>
+
+            {/* Format Note Callout */}
+            <div className="format-note">
+              <div className="format-note-title">💡 How to enter Mobile Number:</div>
+              <ul>
+                <li>Enter any 10-digit mobile number (e.g. <code>9840012345</code> or <code>+91 98400 12345</code>).</li>
+                <li>Country code <code>+91</code> is added automatically if omitted.</li>
+                <li><strong>No room number is required</strong> to send!</li>
+              </ul>
+            </div>
+          </div>
+
+          {/* Right: Batch Upload or Paste Multiple Rows */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div
+              className={`dropzone ${dragOver ? 'dragover' : ''}`}
+              onClick={() => fileInputRef.current && fileInputRef.current.click()}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+                if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFileUpload(e.dataTransfer.files[0]);
+              }}
+            >
+              <span className="dropzone-icon">📥</span>
+              <span className="dropzone-text">Drop Hotel Guest Excel (.xlsx), CSV, or text here</span>
+              <span className="dropzone-sub">or click to browse from computer</span>
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept=".xlsx,.xls,.csv,.tsv,.txt"
+                style={{ display: 'none' }}
+                onChange={(e) => { if (e.target.files && e.target.files[0]) handleFileUpload(e.target.files[0]); }}
+              />
+            </div>
+
+            <div className="field">
+              <label>Or Paste Multiple Rows (Name, Mobile Number, Source)</label>
+              <textarea
+                rows={3}
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                placeholder="Rajesh Kumar, 9840012345&#10;Dr. Anitha S, 9791698889, Booking.com&#10;Praveen Balaji, 8802916696, MakeMyTrip"
+              />
+            </div>
+
+            <div className="row-inline" style={{ justifyContent: 'space-between' }}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-small"
+                onClick={() => { setGuests(HOTEL_DEMO); showToast('Loaded sample guest list'); }}
+              >
+                Load Demo Guests
+              </button>
+              <button type="button" className="btn btn-primary btn-small" onClick={() => handleBuildList()}>
+                Parse Guest Rows
+              </button>
+            </div>
+          </div>
         </div>
       </section>
 
-      {/* Step 2: Message, Emojis & Image Attachment */}
+      {/* Step 2: Message & Live Preview (2-Column Split: Inputs on Left, Preview on Right) */}
       <section className="card">
         <div className="head">
           <p className="eyebrow">Step 2</p>
-          <h2>Customize Google Review Message & Hotel Photo</h2>
+          <h2>Customize Review Message & Live WhatsApp Preview</h2>
         </div>
 
-        <div className="field">
-          <label>Google Review Link (for Le Royal Suite)</label>
-          <input
-            type="url"
-            value={googleLink}
-            onChange={(e) => setGoogleLink(e.target.value)}
-            placeholder="https://g.page/r/your-hotel-link/review"
-          />
-          <p className="hint">In your Google Business Profile for Le Royal Suite, click "Ask for reviews" and paste the short link.</p>
-        </div>
-
-        <div className="field">
-          <div className="row-inline" style={{ justifyContent: 'space-between' }}>
-            <span className="label">Review Request Text</span>
-            <div className="row-inline">
-              <button type="button" className="btn btn-ghost btn-small" onClick={() => setTpl(H_EN)}>
-                English
-              </button>
-              <button type="button" className="btn btn-ghost btn-small" onClick={() => setTpl(H_TA)}>
-                தமிழ்
-              </button>
-            </div>
-          </div>
-
-          <textarea
-            ref={textareaRef}
-            rows={4}
-            value={tpl}
-            onChange={(e) => setTpl(e.target.value)}
-          />
-
-          {/* Emoji Toolbar */}
-          <div className="row-inline" style={{ gap: 4 }}>
-            <span className="hint" style={{ alignSelf: 'center', marginRight: 4 }}>Add Emoji:</span>
-            {HOTEL_EMOJIS.map(em => (
-              <button key={em} type="button" className="emoji-btn" onClick={() => insertText(' ' + em)}>
-                {em}
-              </button>
-            ))}
-          </div>
-
-          {/* Tag Toolbar */}
-          <div className="row-inline" style={{ gap: 4 }}>
-            <span className="hint" style={{ alignSelf: 'center', marginRight: 4 }}>Insert Tag:</span>
-            {['{name}', '{room}', '{hotel}', '{date}', '{link}'].map(tag => (
-              <button key={tag} type="button" className="tag-btn" onClick={() => insertText(tag)}>
-                + {tag}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Image Attachment Box */}
-        <div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 14, background: 'var(--bg)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <label className="check">
+        <div className="step2-split">
+          {/* Left Column: Message Inputs & Controls */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div className="field">
+              <label>Google Review Link (for Le Royal Suite)</label>
               <input
-                type="checkbox"
-                checked={attachImage}
-                onChange={(e) => setAttachImage(e.target.checked)}
+                type="url"
+                value={googleLink}
+                onChange={(e) => setGoogleLink(e.target.value)}
+                placeholder="https://g.page/r/your-hotel-link/review"
               />
-              <strong>Attach Hotel Suite Banner / Photo with WhatsApp Message</strong>
-            </label>
-            <button
-              type="button"
-              className="btn btn-ghost btn-small"
-              onClick={() => imgInputRef.current && imgInputRef.current.click()}
-            >
-              Upload Hotel Photo
-            </button>
-            <input
-              type="file"
-              ref={imgInputRef}
-              accept="image/*"
-              style={{ display: 'none' }}
-              onChange={(e) => { if (e.target.files && e.target.files[0]) handleCustomImageUpload(e.target.files[0]); }}
-            />
-          </div>
+              <p className="hint">In your Google Business Profile, click "Ask for reviews" and paste the short link here.</p>
+            </div>
 
-          {attachImage && selectedImage && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <img src={selectedImage} alt="Hotel Banner Thumbnail" style={{ width: 120, height: 75, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--line)' }} />
-              <div style={{ fontSize: 13, color: 'var(--muted)' }}>
-                Guests will receive this luxury banner/photo in WhatsApp with your Google Review request as caption!
+            <div className="field">
+              <div className="row-inline" style={{ justifyContent: 'space-between' }}>
+                <span className="label">Review Request Text</span>
+                <div className="row-inline">
+                  <button type="button" className="btn btn-ghost btn-small" onClick={() => setTpl(H_EN)}>
+                    English
+                  </button>
+                  <button type="button" className="btn btn-ghost btn-small" onClick={() => setTpl(H_TA)}>
+                    தமிழ்
+                  </button>
+                </div>
+              </div>
+
+              <textarea
+                ref={textareaRef}
+                rows={5}
+                value={tpl}
+                onChange={(e) => setTpl(e.target.value)}
+              />
+
+              {/* Emoji Toolbar */}
+              <div className="row-inline" style={{ gap: 4 }}>
+                <span className="hint" style={{ alignSelf: 'center', marginRight: 4 }}>Add Emoji:</span>
+                {HOTEL_EMOJIS.map(em => (
+                  <button key={em} type="button" className="emoji-btn" onClick={() => insertText(' ' + em)}>
+                    {em}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tag Toolbar */}
+              <div className="row-inline" style={{ gap: 4 }}>
+                <span className="hint" style={{ alignSelf: 'center', marginRight: 4 }}>Insert Tag:</span>
+                {['{name}', '{hotel}', '{date}', '{link}'].map(tag => (
+                  <button key={tag} type="button" className="tag-btn" onClick={() => insertText(tag)}>
+                    + {tag}
+                  </button>
+                ))}
               </div>
             </div>
-          )}
-        </div>
 
-        {/* Live Preview */}
-        <div className="bubble-wrap">
-          <span className="label">Live WhatsApp Preview</span>
-          <div className="bubble">
-            {attachImage && selectedImage && (
-              <img src={selectedImage} alt="Preview attachment" style={{ maxWidth: '100%', maxHeight: 200, borderRadius: 8, marginBottom: 8, display: 'block', objectFit: 'cover' }} />
-            )}
-            <div>{formatMessage(guests[0] || { name: 'Rajesh Kumar', num: '919840012345', rooms: ['204'] })}</div>
+            {/* Image Attachment Box */}
+            <div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 14, background: 'var(--bg)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={attachImage}
+                    onChange={(e) => setAttachImage(e.target.checked)}
+                  />
+                  <strong>Attach Hotel Suite Banner / Photo with WhatsApp Message</strong>
+                </label>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-small"
+                  onClick={() => imgInputRef.current && imgInputRef.current.click()}
+                >
+                  Upload Photo
+                </button>
+                <input
+                  type="file"
+                  ref={imgInputRef}
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={(e) => { if (e.target.files && e.target.files[0]) handleCustomImageUpload(e.target.files[0]); }}
+                />
+              </div>
+
+              {attachImage && selectedImage && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <img src={selectedImage} alt="Hotel Banner Thumbnail" style={{ width: 110, height: 70, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--line)' }} />
+                  <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+                    Guests will receive this luxury photo with your review request as caption!
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right Column: Sticky Live WhatsApp Preview */}
+          <div className="preview-sticky">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span className="label" style={{ fontSize: 13, fontWeight: 700 }}>💬 Live WhatsApp Visualization</span>
+              <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}>Real-time updates</span>
+            </div>
+
+            <div className="wa-phone-card">
+              <div className="wa-phone-header">
+                <div className="wa-phone-header-left">
+                  <img src="/logo.jpg" alt="Avatar" className="wa-avatar" />
+                  <div>
+                    <div className="wa-contact-name">{hotel}</div>
+                    <div className="wa-contact-status">online</div>
+                  </div>
+                </div>
+                <div style={{ fontSize: 16, opacity: 0.85 }}>📞 📹 ⫶</div>
+              </div>
+
+              <div className="wa-chat-body">
+                <div className="wa-chat-bubble">
+                  {attachImage && selectedImage && (
+                    <img src={selectedImage} alt="Preview Attachment" className="wa-bubble-img" />
+                  )}
+                  <div>
+                    {formatMessage(guests[0] || { name: 'Rajesh Kumar', num: '919840012345', src: 'Direct' })}
+                  </div>
+                  <div className="wa-time-meta">
+                    <span>10:45 AM</span>
+                    <span className="wa-check">✓✓</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ fontSize: 12, color: 'var(--muted)', background: 'var(--surface)', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--line)', lineHeight: 1.4 }}>
+              💡 <strong>Instant Preview:</strong> Any changes made on the left (text, emojis, photo) appear right here as your guest will see it on WhatsApp.
+            </div>
           </div>
         </div>
       </section>
 
-      {/* Step 3: Send to All Guests */}
+      {/* Step 3: Send to All Guests & Member List */}
       <section className="card" id="step3">
         <div className="head">
           <p className="eyebrow">Step 3</p>
-          <h2>1-Click Delivery to All Guests</h2>
+          <h2>Delivery to All Guests ({total} Total)</h2>
         </div>
 
         <div style={{ padding: 18, border: '2px solid var(--accent)', borderRadius: 14, background: 'var(--surface)', display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -503,7 +719,7 @@ export default function App() {
                 {isSending ? `Sending to guests (${batchProgress.currentIndex} of ${total})...` : `Ready to send to ${total} guests`}
               </div>
               <div style={{ fontSize: 13, color: 'var(--muted)' }}>
-                {attachImage ? 'Sending luxury banner photo with review caption & emojis.' : 'Sending text message with emojis.'}
+                {attachImage ? 'Sending photo with formatted text caption & emojis.' : 'Sending text message with emojis.'}
               </div>
             </div>
 
@@ -523,7 +739,7 @@ export default function App() {
           </div>
 
           <div className="meter" style={{ height: 12 }}>
-            <span style={{ width: `${percentDone}%`, background: isSending ? 'linear-gradient(90deg, #B45309, #F59E0B)' : 'var(--accent)' }}></span>
+            <span style={{ width: `${percentDone}%`, background: isSending ? 'linear-gradient(90deg, #C59B27, #F5D77F)' : 'var(--accent)' }}></span>
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--muted)' }}>
@@ -559,7 +775,7 @@ export default function App() {
             <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 10, padding: 8, fontSize: 13, background: 'var(--bg)' }}>
               {batchProgress.sentList.map((s, idx) => (
                 <div key={idx} style={{ padding: '4px 6px', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--line)' }}>
-                  <span>✓ <strong>{s.name}</strong> ({formatPhoneDisplay(s.num)}) {s.rooms && s.rooms.length ? `[Room: ${s.rooms.join(',')}]` : ''}</span>
+                  <span>✓ <strong>{s.name}</strong> ({formatPhoneDisplay(s.num)})</span>
                   <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Sent at {s.time}</span>
                 </div>
               ))}
@@ -567,7 +783,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Guest List */}
+        {/* Guest List with Individual Send */}
         <div style={{ marginTop: 14 }}>
           <div className="toolbar">
             <div className="tabs">
@@ -586,30 +802,50 @@ export default function App() {
               className="search-input"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="🔍 Search guest, room, phone..."
+              placeholder="🔍 Search name, phone..."
             />
           </div>
 
           <ul className="list" style={{ marginTop: 10 }}>
             {displayList.map(g => {
               const isSent = sentNumSet.has(g.num);
+              const isSendingThis = sendingNum === g.num;
               return (
                 <li key={g.num} className={`row ${isSent ? 'done' : ''}`}>
                   <div className="who">
                     <div className="name-row">
                       <span className="name">{getDisplayName(g.name)}</span>
-                      {g.rooms && g.rooms.length > 0 && <span className="room-badge">Room {g.rooms.join(', ')}</span>}
                     </div>
                     <div className="num-row">
                       <span className="num">{formatPhoneDisplay(g.num)}</span>
                     </div>
                   </div>
-                  <span className="chip">{g.src || 'Direct'}</span>
-                  {isSent ? (
-                    <span style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 600 }}>✓ Sent</span>
-                  ) : (
-                    <span style={{ fontSize: 13, color: 'var(--muted)' }}>Pending</span>
-                  )}
+                  <span className="chip">
+                    {g.src || 'Direct'}
+                  </span>
+                  <div className="member-row-actions">
+                    {isSent ? (
+                      <span style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 600 }}>✓ Sent</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn-send-single"
+                        onClick={() => handleSendSingle(g)}
+                        disabled={isSendingThis || waStatus !== 'connected'}
+                        title="Send WhatsApp review request to this guest now"
+                      >
+                        {isSendingThis ? 'Sending...' : '⚡ Send'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="btn-remove-row"
+                      onClick={() => handleRemoveGuest(g.num)}
+                      title="Remove from list"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </li>
               );
             })}

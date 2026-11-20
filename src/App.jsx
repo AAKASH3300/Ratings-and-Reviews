@@ -1,31 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
-import { parseChartContent, formatPhoneDisplay } from './utils/ezeeinfoParser';
+import { parseChartContent, formatPhoneDisplay, normalizePhone, cleanPassengerName, titleCase } from './utils/ezeeinfoParser';
 
-const KEY = 'omni-bus-vite-v2';
-const HIST_KEY = 'omni-bus-sent-hist-v2';
+const KEY = 'spyderzlink-bus-v1';
+const BUS_EMOJIS = ['🚌', '🚍', '⭐', '🌟', '🙏', '✨', '🛣️', '🎫', '🛋️', '❄️', '📍', '💖'];
 
-const R_EN = "Hi {name}, thank you for travelling with {bus} ({route}) yesterday! redBus will send you a message on WhatsApp to rate your trip. If you enjoyed your journey, please take a moment to give us a 5-star rating on redBus. As a new service, your rating helps us tremendously. Thank you!";
-const R_TA = "வணக்கம் {name}, நேற்று {bus}-ல் ({route}) பயணம் செய்தமைக்கு மிக்க நன்றி! உங்கள் பயணத்தை rate செய்ய redBus WhatsApp-ல் ஒரு செய்தி அனுப்பும். பயணம் பிடித்திருந்தால், redBus-ல் எங்களுக்கு 5-star rating கொடுங்கள். புதிய சேவையான எங்களுக்கு உங்கள் ஆதரவு மிகவும் உதவும். நன்றி!";
-const D_EN = "Hi {name}, thank you for travelling with {bus} ({route}) yesterday! How was your trip? If you enjoyed your journey, a quick 5-star Google review would really help our service: {link} - Thank you!";
-const D_TA = "வணக்கம் {name}, நேற்று {bus}-ல் ({route}) பயணம் செய்தமைக்கு மிக்க நன்றி! உங்கள் பயண அனுபவம் எப்படி இருந்தது? ஒரு நிமிடம் ஒதுக்கி எங்களுக்கு ஒரு Google review கொடுத்தால் மிகவும் உதவியாக இருக்கும்: {link}";
-
-const EZEE_DEMO = [
-  { name: 'Ashwanth', num: '916382836622', seats: ['L4'], src: 'r' },
-  { name: 'Lakshmi', num: '918220801522', seats: ['L13', 'L14W'], src: 'r' },
-  { name: 'Gowthaman', num: '919342331226', seats: ['U2'], src: 'r' },
-  { name: 'Banumathi', num: '919445704763', seats: ['U13', 'U14W'], src: 'r' },
-  { name: 'Ananth', num: '916382361789', seats: ['L5'], src: 'r' },
-  { name: 'Dinesh Kumar', num: '919080208773', seats: ['U5'], src: 'r' },
-  { name: 'Prabhakaran', num: '917305836990', seats: ['U4'], src: 'd' }
-];
+const R_EN = "Hi {name}, thank you for travelling with {bus} ({route}) yesterday! ⭐ redBus will send you a message on WhatsApp to rate your trip. If you enjoyed your journey, please give us a 5-star rating on redBus 🚌✨. As a new service, your rating helps us tremendously! 🙏";
+const R_TA = "வணக்கம் {name}, நேற்று {bus}-ல் ({route}) பயணம் செய்தமைக்கு மிக்க நன்றி! 🚌 உங்கள் பயணத்தை rate செய்ய redBus WhatsApp-ல் ஒரு செய்தி அனுப்பும். பயணம் பிடித்திருந்தால், redBus-ல் எங்களுக்கு 5-star rating கொடுங்கள் ⭐⭐⭐⭐⭐. உங்கள் ஆதரவு எங்களுக்கு மிகவும் உதவும்! 🙏✨";
+const D_EN = "Hi {name}, thank you for travelling with {bus} ({route}) yesterday! 🚌 How was your trip? If you enjoyed your journey, a quick 5-star Google review would really help our service: {link} ⭐⭐⭐⭐⭐ - Thank you! 🙏";
+const D_TA = "வணக்கம் {name}, நேற்று {bus}-ல் ({route}) பயணம் செய்தமைக்கு மிக்க நன்றி! 🚌 உங்கள் பயண அனுபவம் எப்படி இருந்தது? ஒரு நிமிடம் ஒதுக்கி எங்களுக்கு ஒரு Google review கொடுத்தால் மிகவும் உதவியாக இருக்கும்: {link} ⭐⭐⭐⭐⭐ - நன்றி! 🙏";
 
 export default function App() {
   const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
 
-  // Config State
   const [bus, setBus] = useState('SpyderZ Link');
-  const [route, setRoute] = useState('Udumalpet ↔ Chennai');
+  const [route, setRoute] = useState('Udumalaipettai to Chennai');
   const [date, setDate] = useState(yesterday);
   const [googleLink, setGoogleLink] = useState('');
   const [tplR, setTplR] = useState(R_TA);
@@ -34,10 +23,7 @@ export default function App() {
   const [useFirstName, setUseFirstName] = useState(false);
   const [defSrc, setDefSrc] = useState('r');
   const [pasteText, setPasteText] = useState('');
-  const [passengers, setPassengers] = useState(EZEE_DEMO);
-  const [invalidLines, setInvalidLines] = useState([]);
-  const [dupesCount, setDupesCount] = useState(2);
-  const [isExample, setIsExample] = useState(true);
+  const [passengers, setPassengers] = useState([]);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [theme, setTheme] = useState('light');
@@ -45,13 +31,24 @@ export default function App() {
   const [dragOver, setDragOver] = useState(false);
   const [delaySeconds, setDelaySeconds] = useState(6);
 
+  // Quick Add State (for 1 or 2 specific passengers)
+  const [quickName, setQuickName] = useState('');
+  const [quickNum, setQuickNum] = useState('');
+  const [quickSrc, setQuickSrc] = useState('r');
+  const [quickSeat, setQuickSeat] = useState('');
+  const [sendingNum, setSendingNum] = useState(null);
+
+  // Image Attachment State
+  const [attachImage, setAttachImage] = useState(true);
+  const [selectedImage, setSelectedImage] = useState(null);
+
   // WhatsApp Backend Connection State
-  const [waStatus, setWaStatus] = useState('connecting'); // 'connecting' | 'qr' | 'connected' | 'disconnected'
+  const [waStatus, setWaStatus] = useState('connecting');
   const [waQrCode, setWaQrCode] = useState(null);
   const [waUserPhone, setWaUserPhone] = useState(null);
   const [showQrModal, setShowQrModal] = useState(false);
 
-  // 1-Click Automated Batch Sending State
+  // Batch Progress State
   const [batchProgress, setBatchProgress] = useState({
     isSending: false,
     total: 0,
@@ -63,9 +60,19 @@ export default function App() {
 
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
+  const imgInputRef = useRef(null);
 
-  // Load saved preferences
+  // Load default bus image & saved preferences
   useEffect(() => {
+    fetch('/api/default-image')
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.dataUrl) {
+          setSelectedImage(data.dataUrl);
+        }
+      })
+      .catch(() => {});
+
     try {
       const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
       if (saved) {
@@ -77,24 +84,28 @@ export default function App() {
         if (saved.tplD) setTplD(saved.tplD);
         if (saved.activeTab) setActiveTab(saved.activeTab);
         if (saved.useFirstName !== undefined) setUseFirstName(saved.useFirstName);
-        if (saved.passengers && saved.passengers.length) {
-          setPassengers(saved.passengers);
-          setIsExample(false);
-        }
         if (saved.theme) setTheme(saved.theme);
+        if (saved.attachImage !== undefined) setAttachImage(saved.attachImage);
       }
     } catch (e) {}
+
+    // Auto-load yesterday's chart on startup
+    fetch('/api/upload-chart-pdf', { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.passengers) {
+          if (data.route) setRoute(data.route);
+          if (data.date) setDate(data.date);
+          setPassengers(data.passengers);
+        }
+      })
+      .catch(() => {});
   }, []);
 
-  // Save preferences
   useEffect(() => {
-    const data = {
-      bus, route, date, googleLink, tplR, tplD,
-      activeTab, useFirstName, passengers: isExample ? [] : passengers,
-      theme
-    };
+    const data = { bus, route, date, googleLink, tplR, tplD, activeTab, useFirstName, theme, attachImage };
     try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) {}
-  }, [bus, route, date, googleLink, tplR, tplD, activeTab, useFirstName, passengers, theme, isExample]);
+  }, [bus, route, date, googleLink, tplR, tplD, activeTab, useFirstName, theme, attachImage]);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -140,7 +151,8 @@ export default function App() {
   };
 
   const formatMessage = (p) => {
-    const tpl = (p && p.src === 'd') ? tplD : tplR;
+    const isDirect = (p && p.src === 'd');
+    const tpl = isDirect ? tplD : tplR;
     const name = getDisplayName(p && p.name);
     const seatStr = (p && p.seats && p.seats.length) ? p.seats.join(', ') : '';
     return tpl
@@ -152,28 +164,30 @@ export default function App() {
       .split('{link}').join(googleLink.trim() || '{link}');
   };
 
-  // Build List from Text
-  const handleBuildList = (textToParse = pasteText) => {
-    if (!textToParse.trim()) {
-      showToast('Please paste or upload a chart first.');
-      return;
-    }
-    const res = parseChartContent(textToParse, defSrc);
-    if (!res.rows.length) {
-      showToast('No valid passenger phone numbers detected.');
-      return;
-    }
-    if (res.detectedRoute) setRoute(res.detectedRoute);
-    if (res.detectedDate) setDate(res.detectedDate);
-    setPassengers(res.rows);
-    setInvalidLines(res.invalid);
-    setDupesCount(res.dupes);
-    setIsExample(false);
-    setFilter('all');
-    setPasteText('');
-    showToast(`Loaded ${res.rows.length} passengers!`);
-    const s3 = document.getElementById('step3');
-    if (s3) s3.scrollIntoView({ behavior: 'smooth' });
+  const insertText = (str) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const current = activeTab === 'd' ? tplD : tplR;
+    const updated = current.substring(0, start) + str + current.substring(end);
+    if (activeTab === 'd') setTplD(updated);
+    else setTplR(updated);
+    setTimeout(() => {
+      textarea.selectionStart = textarea.selectionEnd = start + str.length;
+      textarea.focus();
+    }, 10);
+  };
+
+  const handleCustomImageUpload = (file) => {
+    if (!file || !file.type.startsWith('image/')) return alert('Please select a valid image file (PNG/JPG).');
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setSelectedImage(e.target.result);
+      setAttachImage(true);
+      showToast('Attached bus image!');
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleFileUpload = (file) => {
@@ -192,7 +206,6 @@ export default function App() {
               if (data.route) setRoute(data.route);
               if (data.date) setDate(data.date);
               setPassengers(data.passengers);
-              setIsExample(false);
               showToast(`Loaded ${data.passengers.length} passengers (${data.totalSeats} seats) from PDF!`);
             } else {
               alert('Could not parse PDF: ' + (data.error || 'Unknown error'));
@@ -214,54 +227,132 @@ export default function App() {
           const csv = XLSX.utils.sheet_to_csv(firstSheet);
           handleBuildList(csv);
         } catch (err) {
-          alert('Could not parse Excel file: ' + err.message);
+          alert('Could not parse Excel: ' + err.message);
         }
       };
       reader.readAsArrayBuffer(file);
     } else {
       const reader = new FileReader();
-      reader.onload = (e) => {
-        handleBuildList(e.target.result);
-      };
+      reader.onload = (e) => handleBuildList(e.target.result);
       reader.readAsText(file);
     }
   };
 
-  // Disconnect WhatsApp session
-  const handleDisconnectWa = async () => {
-    if (confirm('Disconnect this WhatsApp session? You can reconnect anytime by scanning a new QR code.')) {
-      try {
-        await fetch('/api/whatsapp/disconnect', { method: 'POST' });
-        showToast('Disconnected.');
-      } catch (e) {
-        alert('Error disconnecting: ' + e.message);
+  const handleBuildList = (textToParse = pasteText) => {
+    if (!textToParse.trim()) return showToast('Paste chart rows or upload a file first.');
+    const res = parseChartContent(textToParse, defSrc);
+    if (!res.rows.length) return alert('No valid passenger phone numbers detected. Enter a 10-digit number like 9876543210.');
+    if (res.detectedRoute) setRoute(res.detectedRoute);
+    if (res.detectedDate) setDate(res.detectedDate);
+    setPassengers(res.rows);
+    setFilter('all');
+    setPasteText('');
+    showToast(`Loaded ${res.rows.length} passengers!`);
+  };
+
+  // Quick Add 1 or 2 Passengers to List
+  const handleAddQuickPassenger = () => {
+    if (!quickNum.trim()) return showToast('Please enter a mobile number.');
+    const validNum = normalizePhone(quickNum);
+    if (!validNum) {
+      return alert('Invalid mobile number format. Enter a 10-digit number (e.g. 9876543210 or +91 98765 43210).');
+    }
+    const cleanName = cleanPassengerName(quickName) || 'Sir/Madam';
+    const newPassenger = {
+      name: titleCase(cleanName),
+      num: validNum,
+      seats: quickSeat.trim() ? [quickSeat.trim().toUpperCase()] : [],
+      src: quickSrc
+    };
+    setPassengers(prev => {
+      const filtered = prev.filter(p => p.num !== validNum);
+      return [newPassenger, ...filtered];
+    });
+    setQuickName('');
+    setQuickNum('');
+    setQuickSeat('');
+    showToast(`Added ${newPassenger.name} to passenger list!`);
+  };
+
+  // Send Single WhatsApp Review Message Instantly (for 1 or 2 members)
+  const handleSendSingle = async (passengerToSend) => {
+    if (waStatus !== 'connected') {
+      setShowQrModal(true);
+      return;
+    }
+    if (!passengerToSend || !passengerToSend.num) return;
+    if (passengerToSend.src === 'd' && !googleLink.trim()) {
+      return alert('Please enter your Google Review link for Direct passengers.');
+    }
+
+    setSendingNum(passengerToSend.num);
+    try {
+      const res = await fetch('/api/send-single', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipient: {
+            num: passengerToSend.num,
+            name: getDisplayName(passengerToSend.name),
+            seats: passengerToSend.seats || [],
+            src: passengerToSend.src
+          },
+          message: formatMessage(passengerToSend),
+          imageBase64: attachImage ? selectedImage : null
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert('Failed to send: ' + (data.error || 'Unknown error'));
+      } else {
+        const channelLabel = passengerToSend.src === 'd' ? 'Direct' : 'redBus';
+        showToast(`✓ Sent ${channelLabel} reminder to ${passengerToSend.name}!`);
+        if (data.receipt) {
+          setBatchProgress(prev => ({
+            ...prev,
+            sentList: [data.receipt, ...(prev.sentList || []).filter(s => s.num !== passengerToSend.num)]
+          }));
+        }
       }
+    } catch (e) {
+      alert('Error sending: ' + e.message);
+    } finally {
+      setSendingNum(null);
     }
   };
 
-  // 1-Click "Send to All" Handler
+  // Instant Send Directly from Quick Add Form
+  const handleSendQuickNow = async () => {
+    const validNum = normalizePhone(quickNum);
+    if (!validNum) {
+      return alert('Please enter a valid 10-digit mobile number (e.g. 9876543210).');
+    }
+    const cleanName = cleanPassengerName(quickName) || 'Sir/Madam';
+    const passObj = {
+      name: titleCase(cleanName),
+      num: validNum,
+      seats: quickSeat.trim() ? [quickSeat.trim().toUpperCase()] : [],
+      src: quickSrc
+    };
+    setPassengers(prev => {
+      const filtered = prev.filter(p => p.num !== validNum);
+      return [passObj, ...filtered];
+    });
+    await handleSendSingle(passObj);
+  };
+
+  const handleRemovePassenger = (numToRemove) => {
+    setPassengers(prev => prev.filter(p => p.num !== numToRemove));
+    showToast('Removed from list.');
+  };
+
+  // 1-Click Send to All
   const handleSendAll = async () => {
     if (waStatus !== 'connected') {
       setShowQrModal(true);
       return;
     }
-
-    if (isExample) {
-      alert('Please upload yesterday’s actual passenger chart in Step 1 first before sending.');
-      return;
-    }
-
-    if (!passengers.length) {
-      alert('No passengers in list to send to.');
-      return;
-    }
-
-    const unlinkedDirect = passengers.filter(p => p.src === 'd' && !googleLink.trim());
-    if (unlinkedDirect.length > 0) {
-      if (!confirm(`Warning: You have ${unlinkedDirect.length} direct bookings, but no Google Review link entered. Send anyway?`)) {
-        return;
-      }
-    }
+    if (!passengers.length) return alert('No passengers in list.');
 
     const payloadPassengers = passengers.map(p => ({
       num: p.num,
@@ -277,64 +368,31 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           passengers: payloadPassengers,
+          imageBase64: attachImage ? selectedImage : null,
           delaySeconds: Number(delaySeconds) || 6
         })
       });
-
       const data = await res.json();
-      if (!res.ok) {
-        alert('Failed to start sending: ' + (data.error || 'Unknown error'));
-      } else {
-        showToast('🚀 Automated sending started!');
-      }
+      if (!res.ok) alert('Failed: ' + (data.error || 'Unknown error'));
+      else showToast('🚀 Automated sending started!');
     } catch (e) {
-      alert('Network error communicating with server: ' + e.message);
+      alert('Network error: ' + e.message);
     }
   };
 
-  // Stop / Cancel Sending
   const handleCancelSend = async () => {
-    if (confirm('Pause/Cancel remaining messages?')) {
-      try {
-        await fetch('/api/send-batch/cancel', { method: 'POST' });
-        showToast('Cancelling job...');
-      } catch (e) {}
+    if (confirm('Cancel remaining messages?')) {
+      try { await fetch('/api/send-batch/cancel', { method: 'POST' }); } catch (e) {}
     }
-  };
-
-  // Export CSV Report
-  const handleExportCSV = () => {
-    if (!passengers.length) return alert('No passengers to export.');
-    const sentMap = {};
-    (batchProgress.sentList || []).forEach(s => { sentMap[s.num] = s.time; });
-
-    const rows = [
-      ['Name', 'Mobile', 'Seats', 'Source', 'Status', 'SentTime', 'Route', 'Date', 'Message']
-    ];
-    passengers.forEach(p => {
-      const sentTime = sentMap[p.num] || '';
-      const status = sentTime ? 'Sent' : 'Pending';
-      const seatStr = (p.seats || []).join(';');
-      const msg = formatMessage(p).replace(/"/g, '""');
-      rows.push([`"${p.name}"`, `"${p.num}"`, `"${seatStr}"`, `"${p.src === 'd' ? 'Direct' : 'redBus'}"`, `"${status}"`, `"${sentTime}"`, `"${route}"`, `"${date}"`, `"${msg}"`]);
-    });
-    const blob = new Blob([rows.map(r => r.join(',')).join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Review_Delivery_Report_${date || 'chart'}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
   const total = passengers.length;
   const sentCount = (batchProgress.sentList || []).length;
   const percentDone = total ? Math.round((sentCount / total) * 100) : 0;
   const isSending = batchProgress.isSending;
-
-  // Filter passengers
-  let displayList = passengers;
   const sentNumSet = new Set((batchProgress.sentList || []).map(s => s.num));
+
+  let displayList = passengers;
   if (filter === 'todo') displayList = passengers.filter(p => !sentNumSet.has(p.num));
   else if (filter === 'done') displayList = passengers.filter(p => sentNumSet.has(p.num));
 
@@ -347,14 +405,23 @@ export default function App() {
     );
   }
 
+  const normalizedQuick = normalizePhone(quickNum);
+
   return (
     <div className="wrap">
-      {/* Top Header */}
+      {/* Header */}
       <header className="top-header">
-        <div>
-          <span className="route-tag">{bus} · {route}</span>
-          <h1>Omni Bus Review Sender</h1>
-          <p className="lede">One-click automated post-trip review sender for your passengers. Upload yesterday's chart and tap Send.</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <img
+            src="/logo.jpg"
+            alt="SpyderZ Link Logo"
+            style={{ width: 110, height: 48, objectFit: 'contain', background: '#000', borderRadius: 8, padding: '4px 6px', border: '1px solid var(--line)', boxShadow: '0 2px 6px rgba(0,0,0,0.1)' }}
+          />
+          <div>
+            <span className="route-tag">🚌 {bus} · {route}</span>
+            <h1>SpyderZ Link Review Sender</h1>
+            <p className="lede">Send automated review reminders with custom text, emojis, and official logo to redBus & Direct passengers.</p>
+          </div>
         </div>
         <button
           type="button"
@@ -366,7 +433,7 @@ export default function App() {
         </button>
       </header>
 
-      {/* WhatsApp Status Banner */}
+      {/* WhatsApp Status Bar */}
       <section className="card" style={{ padding: '14px 18px', background: waStatus === 'connected' ? 'var(--accent-soft)' : 'var(--warn-bg)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -374,20 +441,17 @@ export default function App() {
             <div>
               <div style={{ fontWeight: 700, fontSize: 14, color: waStatus === 'connected' ? 'var(--accent)' : 'var(--warn)' }}>
                 {waStatus === 'connected'
-                  ? `WhatsApp Ready: Connected as +${waUserPhone || 'Office WhatsApp'}`
+                  ? `WhatsApp Ready: Connected as +${waUserPhone || 'Bus Office'}`
                   : 'WhatsApp Not Connected to Office Phone'}
               </div>
               <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-                {waStatus === 'connected'
-                  ? 'Ready to send messages to all passengers in 1 click.'
-                  : 'Scan the QR code once to link the office WhatsApp phone.'}
+                {waStatus === 'connected' ? 'Ready to send messages with images in 1 click.' : 'Scan QR code once to link office phone.'}
               </div>
             </div>
           </div>
-
           <div className="row-inline">
             {waStatus === 'connected' ? (
-              <button type="button" className="btn btn-ghost btn-small" onClick={handleDisconnectWa}>
+              <button type="button" className="btn btn-ghost btn-small" onClick={() => fetch('/api/whatsapp/disconnect', { method: 'POST' })}>
                 Disconnect
               </button>
             ) : (
@@ -398,13 +462,11 @@ export default function App() {
           </div>
         </div>
 
-        {/* Inline QR Code if user requests or disconnected */}
         {(showQrModal || (waStatus !== 'connected' && waQrCode)) && (
           <div style={{ marginTop: 12, padding: 16, background: 'var(--surface)', borderRadius: 10, textAlign: 'center', border: '1px solid var(--line)' }}>
-            <h3 style={{ margin: '0 0 6px 0', fontSize: 16 }}>Link Office WhatsApp Phone</h3>
+            <h3 style={{ margin: '0 0 6px 0', fontSize: 16 }}>Link Bus Office WhatsApp Phone</h3>
             <p style={{ margin: '0 0 12px 0', fontSize: 13, color: 'var(--muted)' }}>
-              1. Open WhatsApp on office phone &gt; tap <strong>Settings</strong> (or 3 dots) &gt; <strong>Linked Devices</strong><br/>
-              2. Tap <strong>Link a Device</strong> and point your camera at this QR code:
+              Open WhatsApp on office phone &gt; Linked Devices &gt; Link a Device &gt; Scan this QR code:
             </p>
             {waQrCode ? (
               <img src={waQrCode} alt="WhatsApp QR Code" style={{ width: 220, height: 220, margin: '0 auto', display: 'block', borderRadius: 8 }} />
@@ -420,197 +482,356 @@ export default function App() {
         )}
       </section>
 
-      {/* Step 1: Upload Chart */}
+      {/* Step 1: Add Passengers (Split Layout: Quick Add on Left, Upload/Paste on Right) */}
       <section className="card">
         <div className="head">
           <p className="eyebrow">Step 1</p>
-          <h2>Upload Yesterday's Passenger Chart</h2>
+          <h2>Add Passengers (redBus & Direct)</h2>
         </div>
 
-        {/* Drag & Drop Zone */}
-        <div
-          className={`dropzone ${dragOver ? 'dragover' : ''}`}
-          onClick={() => fileInputRef.current && fileInputRef.current.click()}
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragOver(false);
-            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-              handleFileUpload(e.dataTransfer.files[0]);
-            }
-          }}
-        >
-          <span className="dropzone-icon">📥</span>
-          <span className="dropzone-text">Drop EzeeInfo PDF, Excel (.xlsx), CSV, or Chart text file here</span>
-          <span className="dropzone-sub">or click to browse from computer</span>
-          <input
-            type="file"
-            ref={fileInputRef}
-            accept=".pdf,.xlsx,.xls,.csv,.tsv,.txt"
-            style={{ display: 'none' }}
-            onChange={(e) => {
-              if (e.target.files && e.target.files[0]) {
-                handleFileUpload(e.target.files[0]);
-              }
-            }}
-          />
-        </div>
+        <div className="step1-split">
+          {/* Left: Quick Add for 1 or 2 Members */}
+          <div className="quick-add-box">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <strong style={{ fontSize: 14 }}>⚡ Quick Type & Send (1 or 2 Members)</strong>
+              <span style={{ fontSize: 11, background: 'var(--accent-soft)', color: 'var(--accent)', padding: '2px 8px', borderRadius: 6, fontWeight: 600 }}>Individual</span>
+            </div>
 
-        {/* Paste Box */}
-        <div className="field">
-          <label>Or Paste Chart Lines from EzeeInfo Dashboard / WhatsApp</label>
-          <textarea
-            rows={3}
-            value={pasteText}
-            onChange={(e) => setPasteText(e.target.value)}
-            placeholder="Paste table rows from EzeeInfo Boarding Chart...&#10;L4   SPYQAUBX50600   ASHWANTH   24 M 6382836622   Udumalaipet   Chennai   Redbus&#10;U9   SPYQAUI58M641   ARUN PRAKASH   32 M 9840012345   Direct"
-          />
-        </div>
+            <div className="field">
+              <label>Passenger Name</label>
+              <input
+                type="text"
+                value={quickName}
+                onChange={(e) => setQuickName(e.target.value)}
+                placeholder="e.g. Ramesh / Priya"
+              />
+            </div>
 
-        <div className="row-inline" style={{ justifyContent: 'space-between' }}>
-          <div className="row-inline">
-            <span style={{ fontSize: 13, color: 'var(--muted)' }}>Unspecified:</span>
-            <select
-              value={defSrc}
-              onChange={(e) => setDefSrc(e.target.value)}
-              style={{ width: 'auto', minHeight: 34, padding: '2px 8px', fontSize: 13 }}
-            >
-              <option value="r">redBus</option>
-              <option value="d">Direct</option>
-            </select>
-          </div>
-          <div className="row-inline">
-            <button
-              type="button"
-              className="btn btn-ghost btn-small"
-              style={{ fontWeight: 600, color: 'var(--accent)', borderColor: 'var(--accent)' }}
-              onClick={async () => {
-                try {
-                  const res = await fetch('/api/upload-chart-pdf', { method: 'POST' });
-                  const data = await res.json();
-                  if (data.success && data.passengers) {
-                    if (data.route) setRoute(data.route);
-                    if (data.date) setDate(data.date);
-                    setPassengers(data.passengers);
-                    setIsExample(false);
-                    showToast(`Loaded yesterday's chart: ${data.passengers.length} passengers (${data.totalSeats} seats)!`);
-                  } else {
-                    alert('Error: ' + data.error);
-                  }
-                } catch (e) {
-                  alert('Network error: ' + e.message);
-                }
-              }}
-            >
-              ⚡ Load Yesterday's Chart (18 Nov)
-            </button>
-            <button type="button" className="btn btn-primary btn-small" onClick={() => handleBuildList()}>
-              Build List
-            </button>
-          </div>
-        </div>
-      </section>
+            <div className="field">
+              <label>Mobile Number</label>
+              <input
+                type="text"
+                value={quickNum}
+                onChange={(e) => setQuickNum(e.target.value)}
+                placeholder="e.g. 9876543210 or +91 98765 43210"
+              />
+              {quickNum.trim() ? (
+                normalizedQuick ? (
+                  <div className="phone-validation-hint valid">
+                    ✓ Valid Number: {formatPhoneDisplay(normalizedQuick)}
+                  </div>
+                ) : (
+                  <div className="phone-validation-hint invalid">
+                    ⚠️ Enter a 10-digit number (e.g. 9876543210)
+                  </div>
+                )
+              ) : null}
+            </div>
 
-      {/* Step 2: Message & Link Customization */}
-      <section className="card">
-        <div className="head">
-          <p className="eyebrow">Step 2</p>
-          <h2>Customize Review Messages</h2>
-        </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div className="field">
+                <label>Booking Channel</label>
+                <select value={quickSrc} onChange={(e) => setQuickSrc(e.target.value)}>
+                  <option value="r">redBus</option>
+                  <option value="d">Direct</option>
+                </select>
+              </div>
+              <div className="field">
+                <label>Seat No. (Optional)</label>
+                <input
+                  type="text"
+                  value={quickSeat}
+                  onChange={(e) => setQuickSeat(e.target.value)}
+                  placeholder="e.g. L4, U2"
+                />
+              </div>
+            </div>
 
-        <div className="tabs">
-          <button
-            type="button"
-            className={`tab ${activeTab === 'r' ? 'active' : ''}`}
-            onClick={() => setActiveTab('r')}
-          >
-            redBus Passengers
-          </button>
-          <button
-            type="button"
-            className={`tab ${activeTab === 'd' ? 'active' : ''}`}
-            onClick={() => setActiveTab('d')}
-          >
-            Direct Bookings
-          </button>
-        </div>
-
-        {activeTab === 'd' && (
-          <div className="field">
-            <label>Google Review Link</label>
-            <input
-              type="url"
-              value={googleLink}
-              onChange={(e) => setGoogleLink(e.target.value)}
-              placeholder="https://g.page/r/your-bus-service/review"
-            />
-          </div>
-        )}
-
-        <div className="field">
-          <div className="row-inline" style={{ justifyContent: 'space-between' }}>
-            <span className="label">Message</span>
-            <div className="row-inline">
+            <div className="row-inline" style={{ marginTop: 4 }}>
               <button
                 type="button"
                 className="btn btn-ghost btn-small"
-                onClick={() => activeTab === 'd' ? setTplD(D_EN) : setTplR(R_EN)}
+                onClick={handleAddQuickPassenger}
+                style={{ flex: 1 }}
               >
-                English
+                + Add to List
               </button>
               <button
                 type="button"
-                className="btn btn-ghost btn-small"
-                onClick={() => activeTab === 'd' ? setTplD(D_TA) : setTplR(R_TA)}
+                className="btn btn-primary btn-small"
+                onClick={handleSendQuickNow}
+                disabled={!normalizedQuick || sendingNum === normalizedQuick}
+                style={{ flex: 1 }}
               >
-                தமிழ்
+                {sendingNum === normalizedQuick ? 'Sending...' : '⚡ Send Now'}
+              </button>
+            </div>
+
+            {/* Format Note Callout */}
+            <div className="format-note">
+              <div className="format-note-title">💡 How to enter Mobile Number:</div>
+              <ul>
+                <li>Enter any 10-digit mobile number (e.g. <code>9876543210</code> or <code>+91 98765 43210</code>).</li>
+                <li>Country code <code>+91</code> is automatically added.</li>
+                <li>Ideal for sending redBus/Direct reminders to 1 or 2 passengers separately!</li>
+              </ul>
+            </div>
+          </div>
+
+          {/* Right: Upload File or Paste Rows */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div
+              className={`dropzone ${dragOver ? 'dragover' : ''}`}
+              onClick={() => fileInputRef.current && fileInputRef.current.click()}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+                if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFileUpload(e.dataTransfer.files[0]);
+              }}
+            >
+              <span className="dropzone-icon">📥</span>
+              <span className="dropzone-text">Drop EzeeInfo PDF, Excel (.xlsx), or CSV here</span>
+              <span className="dropzone-sub">or click to browse from computer</span>
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept=".pdf,.xlsx,.xls,.csv,.tsv,.txt"
+                style={{ display: 'none' }}
+                onChange={(e) => { if (e.target.files && e.target.files[0]) handleFileUpload(e.target.files[0]); }}
+              />
+            </div>
+
+            <div className="field">
+              <label>Or Paste Passenger Rows (Name, Mobile, Channel, Seat)</label>
+              <textarea
+                rows={3}
+                value={pasteText}
+                onChange={(e) => setPasteText(e.target.value)}
+                placeholder="Ramesh, 9876543210, redBus, L4&#10;Divya, 9840012345, redBus, U1&#10;Karthik, 9791698889, Direct"
+              />
+            </div>
+
+            <div className="row-inline" style={{ justifyContent: 'space-between' }}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-small"
+                onClick={async () => {
+                  try {
+                    const res = await fetch('/api/upload-chart-pdf', { method: 'POST' });
+                    const data = await res.json();
+                    if (data.success && data.passengers) {
+                      if (data.route) setRoute(data.route);
+                      if (data.date) setDate(data.date);
+                      setPassengers(data.passengers);
+                      showToast(`Loaded yesterday's chart: ${data.passengers.length} passengers!`);
+                    }
+                  } catch (e) {
+                    alert('Error: ' + e.message);
+                  }
+                }}
+              >
+                ⚡ Load Yesterday's Chart
+              </button>
+              <button type="button" className="btn btn-primary btn-small" onClick={() => handleBuildList()}>
+                Parse Passenger Rows
               </button>
             </div>
           </div>
-          <textarea
-            ref={textareaRef}
-            rows={4}
-            value={activeTab === 'd' ? tplD : tplR}
-            onChange={(e) => activeTab === 'd' ? setTplD(e.target.value) : setTplR(e.target.value)}
-          />
+        </div>
+      </section>
+
+      {/* Step 2: Message & Live Preview (2-Column Split: Inputs on Left, Preview on Right) */}
+      <section className="card">
+        <div className="head">
+          <p className="eyebrow">Step 2</p>
+          <h2>Customize Message & Live WhatsApp Preview</h2>
         </div>
 
-        <div className="bubble-wrap">
-          <span className="label">Preview</span>
-          <div className="bubble">
-            {formatMessage(passengers[0] || { name: 'Ashwanth', num: '916382836622', seats: ['L4'], src: activeTab })}
+        <div className="step2-split">
+          {/* Left Column: Message Controls */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* Channel Switch */}
+            <div className="tabs">
+              <button
+                type="button"
+                className={`tab ${activeTab === 'r' ? 'active' : ''}`}
+                onClick={() => setActiveTab('r')}
+              >
+                redBus Passengers
+              </button>
+              <button
+                type="button"
+                className={`tab ${activeTab === 'd' ? 'active' : ''}`}
+                onClick={() => setActiveTab('d')}
+              >
+                Direct Bookings (Google Review)
+              </button>
+            </div>
+
+            {activeTab === 'd' && (
+              <div className="field">
+                <label>Google Review Link</label>
+                <input
+                  type="url"
+                  value={googleLink}
+                  onChange={(e) => setGoogleLink(e.target.value)}
+                  placeholder="https://g.page/r/your-bus-service/review"
+                />
+              </div>
+            )}
+
+            {/* Message Editor */}
+            <div className="field">
+              <div className="row-inline" style={{ justifyContent: 'space-between' }}>
+                <span className="label">Message Text ({activeTab === 'r' ? 'redBus' : 'Direct'})</span>
+                <div className="row-inline">
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-small"
+                    onClick={() => activeTab === 'd' ? setTplD(D_EN) : setTplR(R_EN)}
+                  >
+                    English
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-small"
+                    onClick={() => activeTab === 'd' ? setTplD(D_TA) : setTplR(R_TA)}
+                  >
+                    தமிழ்
+                  </button>
+                </div>
+              </div>
+
+              <textarea
+                ref={textareaRef}
+                rows={5}
+                value={activeTab === 'd' ? tplD : tplR}
+                onChange={(e) => activeTab === 'd' ? setTplD(e.target.value) : setTplR(e.target.value)}
+              />
+
+              {/* Emoji Toolbar */}
+              <div className="row-inline" style={{ gap: 4 }}>
+                <span className="hint" style={{ alignSelf: 'center', marginRight: 4 }}>Add Emoji:</span>
+                {BUS_EMOJIS.map(em => (
+                  <button key={em} type="button" className="emoji-btn" onClick={() => insertText(' ' + em)}>
+                    {em}
+                  </button>
+                ))}
+              </div>
+
+              {/* Dynamic Tag Buttons */}
+              <div className="row-inline" style={{ gap: 4 }}>
+                <span className="hint" style={{ alignSelf: 'center', marginRight: 4 }}>Insert Tag:</span>
+                {['{name}', '{seat}', '{bus}', '{route}', '{date}'].map(tag => (
+                  <button key={tag} type="button" className="tag-btn" onClick={() => insertText(tag)}>
+                    + {tag}
+                  </button>
+                ))}
+                {activeTab === 'd' && (
+                  <button key="{link}" type="button" className="tag-btn" onClick={() => insertText('{link}')}>
+                    + {'{link}'}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Image Attachment Box */}
+            <div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 14, background: 'var(--bg)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={attachImage}
+                    onChange={(e) => setAttachImage(e.target.checked)}
+                  />
+                  <strong>Attach Bus Brochure / Photo with WhatsApp Message</strong>
+                </label>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-small"
+                  onClick={() => imgInputRef.current && imgInputRef.current.click()}
+                >
+                  Upload Image
+                </button>
+                <input
+                  type="file"
+                  ref={imgInputRef}
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={(e) => { if (e.target.files && e.target.files[0]) handleCustomImageUpload(e.target.files[0]); }}
+                />
+              </div>
+
+              {attachImage && selectedImage && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <img src={selectedImage} alt="Bus Brochure Thumbnail" style={{ width: 110, height: 70, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--line)' }} />
+                  <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>
+                    Passengers receive this brochure with your review reminder as the caption!
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right Column: Sticky Live WhatsApp Preview */}
+          <div className="preview-sticky">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span className="label" style={{ fontSize: 13, fontWeight: 700 }}>💬 Live WhatsApp Visualization</span>
+              <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}>Real-time updates</span>
+            </div>
+
+            <div className="wa-phone-card">
+              <div className="wa-phone-header">
+                <div className="wa-phone-header-left">
+                  <img src="/logo.jpg" alt="Avatar" className="wa-avatar" style={{ objectFit: 'contain', background: '#000' }} />
+                  <div>
+                    <div className="wa-contact-name">{bus}</div>
+                    <div className="wa-contact-status">online</div>
+                  </div>
+                </div>
+                <div style={{ fontSize: 16, opacity: 0.85 }}>📞 📹 ⫶</div>
+              </div>
+
+              <div className="wa-chat-body">
+                <div className="wa-chat-bubble">
+                  {attachImage && selectedImage && (
+                    <img src={selectedImage} alt="Preview Attachment" className="wa-bubble-img" />
+                  )}
+                  <div>
+                    {formatMessage(passengers[0] || { name: 'Harikrishnan', num: '917708155207', seats: ['L1'], src: activeTab })}
+                  </div>
+                  <div className="wa-time-meta">
+                    <span>10:45 AM</span>
+                    <span className="wa-check">✓✓</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ fontSize: 12, color: 'var(--muted)', background: 'var(--surface)', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--line)', lineHeight: 1.4 }}>
+              💡 <strong>Instant Preview:</strong> Switching between redBus and Direct tabs or typing new text on the left updates this preview immediately.
+            </div>
           </div>
         </div>
       </section>
 
-      {/* Step 3: Single-Click Send To All */}
+      {/* Step 3: Send to All & Passenger List */}
       <section className="card" id="step3">
         <div className="head">
           <p className="eyebrow">Step 3</p>
-          <h2>1-Click Delivery to All Passengers</h2>
+          <h2>Delivery to All Passengers ({total} Total)</h2>
         </div>
 
-        {/* Big Action Box */}
-        <div style={{
-          padding: 20,
-          background: 'var(--surface)',
-          border: '2px solid var(--accent)',
-          borderRadius: 14,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 14,
-          boxShadow: '0 4px 16px rgba(11, 122, 71, 0.1)'
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+        <div style={{ padding: 18, border: '2px solid var(--accent)', borderRadius: 14, background: 'var(--surface)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
             <div>
               <div style={{ fontSize: 18, fontWeight: 700 }}>
                 {isSending ? `Sending to passengers (${batchProgress.currentIndex} of ${total})...` : `Ready to send to ${total} passengers`}
               </div>
               <div style={{ fontSize: 13, color: 'var(--muted)' }}>
-                {isSending
-                  ? `Currently sending to: ${batchProgress.currentPassenger ? `${batchProgress.currentPassenger.name} (+${batchProgress.currentPassenger.num})` : 'Next...'}`
-                  : 'Automated sequence: Sends WhatsApp messages in the background with safe rate-limiting.'}
+                {attachImage ? 'Sending brochure photo with formatted text caption & emojis.' : 'Sending text message with emojis.'}
               </div>
             </div>
 
@@ -625,12 +846,10 @@ export default function App() {
                 <option value={5}>5s per passenger</option>
                 <option value={6}>6s per passenger (Recommended)</option>
                 <option value={8}>8s per passenger</option>
-                <option value={10}>10s per passenger</option>
               </select>
             </div>
           </div>
 
-          {/* Progress Bar */}
           <div className="meter" style={{ height: 12 }}>
             <span style={{ width: `${percentDone}%`, background: isSending ? 'linear-gradient(90deg, #0B7A47, #34D58A)' : 'var(--accent)' }}></span>
           </div>
@@ -640,32 +859,29 @@ export default function App() {
             <span><strong>{percentDone}%</strong> completed</span>
           </div>
 
-          {/* Primary Action Button */}
-          <div style={{ display: 'flex', gap: 10 }}>
-            {isSending ? (
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={handleCancelSend}
-                style={{ flex: 1, minHeight: 50, fontSize: 16, color: 'var(--warn)', borderColor: 'var(--warn)' }}
-              >
-                ⏹ Stop / Cancel Sending
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={handleSendAll}
-                style={{ flex: 1, minHeight: 50, fontSize: 16, fontWeight: 700 }}
-              >
-                🚀 Send to All Passengers (1-Click)
-              </button>
-            )}
-          </div>
+          {isSending ? (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={handleCancelSend}
+              style={{ minHeight: 50, fontSize: 16, color: 'var(--warn)', borderColor: 'var(--warn)' }}
+            >
+              ⏹ Stop / Cancel Sending
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleSendAll}
+              style={{ minHeight: 50, fontSize: 16, fontWeight: 700 }}
+            >
+              🚀 Send to All Passengers (1-Click)
+            </button>
+          )}
         </div>
 
-        {/* Live Delivery Activity Log */}
-        {((batchProgress.sentList && batchProgress.sentList.length > 0) || (batchProgress.failedList && batchProgress.failedList.length > 0)) && (
+        {/* Live Receipts */}
+        {(batchProgress.sentList && batchProgress.sentList.length > 0) && (
           <div style={{ marginTop: 10 }}>
             <h4 style={{ margin: '0 0 8px 0', fontSize: 14 }}>Live Delivery Receipts</h4>
             <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 10, padding: 8, fontSize: 13, background: 'var(--bg)' }}>
@@ -675,43 +891,24 @@ export default function App() {
                   <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Sent at {s.time}</span>
                 </div>
               ))}
-              {batchProgress.failedList.map((f, idx) => (
-                <div key={idx} style={{ padding: '4px 6px', display: 'flex', justifyContent: 'space-between', color: 'var(--rb)' }}>
-                  <span>✗ <strong>{f.name}</strong> ({formatPhoneDisplay(f.num)})</span>
-                  <span>Failed: {f.error}</span>
-                </div>
-              ))}
             </div>
           </div>
         )}
 
-        {/* Toolbar & Passenger List */}
+        {/* Passenger List with Individual Send */}
         <div style={{ marginTop: 14 }}>
           <div className="toolbar">
             <div className="tabs">
-              <button
-                type="button"
-                className={`tab ${filter === 'all' ? 'active' : ''}`}
-                onClick={() => setFilter('all')}
-              >
+              <button type="button" className={`tab ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>
                 All <b>{total}</b>
               </button>
-              <button
-                type="button"
-                className={`tab ${filter === 'todo' ? 'active' : ''}`}
-                onClick={() => setFilter('todo')}
-              >
+              <button type="button" className={`tab ${filter === 'todo' ? 'active' : ''}`} onClick={() => setFilter('todo')}>
                 Pending <b>{total - sentCount}</b>
               </button>
-              <button
-                type="button"
-                className={`tab ${filter === 'done' ? 'active' : ''}`}
-                onClick={() => setFilter('done')}
-              >
+              <button type="button" className={`tab ${filter === 'done' ? 'active' : ''}`} onClick={() => setFilter('done')}>
                 Sent <b>{sentCount}</b>
               </button>
             </div>
-
             <input
               type="text"
               className="search-input"
@@ -724,47 +921,53 @@ export default function App() {
           <ul className="list" style={{ marginTop: 10 }}>
             {displayList.map(p => {
               const isSent = sentNumSet.has(p.num);
+              const isSendingThis = sendingNum === p.num;
               return (
                 <li key={p.num} className={`row ${isSent ? 'done' : ''}`}>
                   <div className="who">
                     <div className="name-row">
                       <span className="name">{getDisplayName(p.name)}</span>
-                      {p.seats && p.seats.length > 0 && (
-                        <span className="seat-badge">{p.seats.join(', ')}</span>
-                      )}
+                      {p.seats && p.seats.length > 0 && <span className="seat-badge">{p.seats.join(', ')}</span>}
                     </div>
                     <div className="num-row">
                       <span className="num">{formatPhoneDisplay(p.num)}</span>
                     </div>
                   </div>
-
                   <span className={`chip ${p.src === 'd' ? 'chip-d' : 'chip-r'}`}>
                     {p.src === 'd' ? 'Direct' : 'redBus'}
                   </span>
-
-                  {isSent ? (
-                    <span style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 600 }}>✓ Sent</span>
-                  ) : (
-                    <span style={{ fontSize: 13, color: 'var(--muted)' }}>Pending</span>
-                  )}
+                  <div className="member-row-actions">
+                    {isSent ? (
+                      <span style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 600 }}>✓ Sent</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn-send-single"
+                        onClick={() => handleSendSingle(p)}
+                        disabled={isSendingThis || waStatus !== 'connected'}
+                        title={`Send ${p.src === 'd' ? 'Direct' : 'redBus'} review reminder now`}
+                      >
+                        {isSendingThis ? 'Sending...' : '⚡ Send'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="btn-remove-row"
+                      onClick={() => handleRemovePassenger(p.num)}
+                      title="Remove from list"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </li>
               );
             })}
           </ul>
         </div>
-
-        {/* Footer */}
-        <div className="foot">
-          <button type="button" className="btn btn-ghost btn-small" onClick={handleExportCSV}>
-            📥 Download Delivery Report (CSV)
-          </button>
-        </div>
       </section>
 
       {/* Toast */}
-      <div className={`toast ${toastMsg ? 'show' : ''}`} role="status">
-        {toastMsg}
-      </div>
+      <div className={`toast ${toastMsg ? 'show' : ''}`} role="status">{toastMsg}</div>
     </div>
   );
 }

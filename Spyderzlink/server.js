@@ -248,6 +248,58 @@ app.post('/api/send-batch/cancel', (req, res) => {
   res.json({ success: true, message: 'No job running.' });
 });
 
+// Single Message Instant Send (for 1 or 2 specific passengers)
+app.post('/api/send-single', async (req, res) => {
+  if (connectionStatus !== 'connected' || !sock) {
+    return res.status(400).json({
+      error: 'WhatsApp is not connected. Please scan the QR code first.'
+    });
+  }
+
+  const { recipient, message, imageBase64 } = req.body;
+  if (!recipient || !recipient.num) {
+    return res.status(400).json({ error: 'Recipient phone number is required.' });
+  }
+  if (!message || !message.trim()) {
+    return res.status(400).json({ error: 'Message text cannot be empty.' });
+  }
+
+  let imageBuffer = null;
+  if (imageBase64 && typeof imageBase64 === 'string') {
+    const clean = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+    imageBuffer = Buffer.from(clean, 'base64');
+  }
+
+  const jid = `${recipient.num}@s.whatsapp.net`;
+  try {
+    if (imageBuffer && imageBuffer.length > 0) {
+      await sock.sendMessage(jid, {
+        image: imageBuffer,
+        caption: message
+      });
+    } else {
+      await sock.sendMessage(jid, { text: message });
+    }
+
+    const receipt = {
+      num: recipient.num,
+      name: recipient.name || 'Passenger',
+      seats: recipient.seats || [],
+      src: recipient.src || 'r',
+      time: new Date().toLocaleTimeString('en-IN', { hour12: true })
+    };
+
+    if (!batchJob.sentList) batchJob.sentList = [];
+    batchJob.sentList = [receipt, ...batchJob.sentList.filter(s => s.num !== recipient.num)];
+
+    console.log(`[Spyderzlink Single] Sent successfully to ${recipient.name} (+${recipient.num})`);
+    res.json({ success: true, receipt });
+  } catch (err) {
+    console.error(`[Spyderzlink Single] Failed for ${recipient.num}:`, err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // PDF Parser for Ezeeinfo Charts
 app.post('/api/upload-chart-pdf', async (req, res) => {
   try {
