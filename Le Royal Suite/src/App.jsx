@@ -5,13 +5,6 @@ import { parseHotelGuests, formatPhoneDisplay, normalizePhone, cleanGuestName, t
 const KEY = 'le-royal-suite-v1';
 const HOTEL_EMOJIS = ['🏨', '🛏️', '⭐', '🌟', '🙏', '✨', '🛎️', '☕', '🍽️', '📍', '💖', '🌸'];
 
-const HOTEL_DEMO = [
-  { name: 'Rajesh Kumar', num: '919840012345', src: 'Direct' },
-  { name: 'Dr. Anitha S', num: '919791698889', src: 'Booking.com' },
-  { name: 'Praveen Balaji', num: '918802916696', src: 'Direct' },
-  { name: 'Siddharth R', num: '919440110078', src: 'MakeMyTrip' }
-];
-
 const H_EN = "Dear {name}, thank you for staying with us at {hotel}! 🏨✨ We hope you had a pleasant and relaxing stay. If you enjoyed our hospitality, could you please take a moment to share your experience on our Google page? ⭐⭐⭐⭐⭐ Your review helps our team grow: {link} - Warm regards, {hotel} Team 🙏";
 const H_TA = "வணக்கம் {name}, {hotel}-ல் தங்கியிருந்தமைக்கு மிக்க நன்றி! 🏨✨ உங்கள் தங்குதல் இனிமையாகவும் திருப்திகரமாகவும் அமைந்திருக்கும் என நம்புகிறோம். எங்கள் சேவை பிடித்திருந்தால், Google-ல் எங்களுக்கு 5-star review கொடுத்து வாழ்த்துங்கள் ⭐⭐⭐⭐⭐: {link} - அன்புடன், {hotel} நிர்வாகம் 🙏";
 
@@ -24,7 +17,7 @@ export default function App() {
   const [tpl, setTpl] = useState(H_EN);
   const [useFirstName, setUseFirstName] = useState(false);
   const [pasteText, setPasteText] = useState('');
-  const [guests, setGuests] = useState(HOTEL_DEMO);
+  const [guests, setGuests] = useState([]);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [theme, setTheme] = useState('light');
@@ -597,13 +590,15 @@ export default function App() {
             </div>
 
             <div className="row-inline" style={{ justifyContent: 'space-between' }}>
-              <button
-                type="button"
-                className="btn btn-ghost btn-small"
-                onClick={() => { setGuests(HOTEL_DEMO); showToast('Loaded sample guest list'); }}
-              >
-                Load Demo Guests
-              </button>
+              {guests.length > 0 ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-small"
+                  onClick={() => { setGuests([]); showToast('Cleared guest list.'); }}
+                >
+                  Clear List
+                </button>
+              ) : <div />}
               <button type="button" className="btn btn-primary btn-small" onClick={() => handleBuildList()}>
                 Parse Guest Rows
               </button>
@@ -751,7 +746,7 @@ export default function App() {
                       <img src={selectedImage} alt="Preview Attachment" className="wa-bubble-img" />
                     )}
                     <div>
-                      {formatMessage(guests[0] || { name: 'Rajesh Kumar', num: '919840012345', src: 'Direct' })}
+                      {formatMessage(guests[0] || { name: 'Guest Name', num: '919876543210', src: 'Direct' })}
                     </div>
                     <div className="wa-time-meta">
                       <span>10:45 AM</span>
@@ -918,7 +913,16 @@ export default function App() {
           </div>
 
           <ul className="list" style={{ marginTop: 12 }}>
-            {displayList.map(g => {
+            {displayList.length === 0 ? (
+              <li style={{ padding: '36px 16px', textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>🏨</div>
+                <strong>No guests in list yet.</strong>
+                <div style={{ fontSize: 13, marginTop: 4 }}>
+                  Add a guest with the Quick Add form above or upload an Excel / CSV chart.
+                </div>
+              </li>
+            ) : (
+              displayList.map(g => {
               const isSent = sentNumSet.has(g.num);
               const isSendingThis = sendingNum === g.num;
               return (
@@ -959,7 +963,7 @@ export default function App() {
                   </div>
                 </li>
               );
-            })}
+            }))}
           </ul>
         </div>
       </section>
