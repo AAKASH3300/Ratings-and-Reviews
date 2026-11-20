@@ -178,58 +178,86 @@ app.post('/api/send-batch', async (req, res) => {
   (async () => {
     console.log(`[Batch] Starting review request delivery to ${passengers.length} passengers...`);
 
-    for (let i = 0; i < passengers.length; i++) {
-      if (batchJob.shouldCancel) {
-        console.log('[Batch] Sending cancelled by user.');
-        break;
-      }
+    try {
+      for (let i = 0; i < passengers.length; i++) {
+        if (batchJob.shouldCancel) {
+          console.log('[Batch] Sending cancelled by user.');
+          break;
+        }
 
-      const p = passengers[i];
-      batchJob.currentIndex = i + 1;
-      batchJob.currentPassenger = {
-        name: p.name,
-        num: p.num,
-        seats: p.seats,
-        src: p.src
-      };
-
-      const jid = `${p.num}@s.whatsapp.net`;
-
-      try {
-        // Send WhatsApp message
-        await sock.sendMessage(jid, { text: p.message });
-
-        batchJob.sentList.push({
-          num: p.num,
+        const p = passengers[i];
+        batchJob.currentIndex = i + 1;
+        batchJob.currentPassenger = {
           name: p.name,
-          seats: p.seats,
-          src: p.src,
-          time: new Date().toLocaleTimeString('en-IN', { hour12: true })
-        });
-
-        console.log(`[Batch] (${i + 1}/${passengers.length}) Sent to ${p.name} (+${p.num}) [Seats: ${(p.seats||[]).join(',')}]`);
-      } catch (err) {
-        console.error(`[Batch] Failed for ${p.name} (+${p.num}):`, err.message);
-        batchJob.failedList.push({
           num: p.num,
-          name: p.name,
           seats: p.seats,
-          src: p.src,
-          error: err.message
-        });
-      }
+          src: p.src
+        };
 
-      // Safe rate-limiting delay between messages (if not last item)
-      if (i < passengers.length - 1 && !batchJob.shouldCancel) {
-        const ms = Math.max(delaySeconds, 3) * 1000;
-        await new Promise(r => setTimeout(r, ms));
+        const cleanNum = String(p.num || '').replace(/\D/g, '');
+        if (!cleanNum || cleanNum.length < 10) {
+          console.error(`[Batch] Invalid phone number for ${p.name}: ${p.num}`);
+          batchJob.failedList.push({
+            num: p.num,
+            name: p.name,
+            seats: p.seats,
+            src: p.src,
+            error: 'Invalid phone number format'
+          });
+          continue;
+        }
+
+        const jid = `${cleanNum}@s.whatsapp.net`;
+
+        try {
+          if (imageBuffer && imageBuffer.length > 0) {
+            try {
+              await sock.sendMessage(jid, {
+                image: imageBuffer,
+                caption: p.message
+              });
+            } catch (imgErr) {
+              console.warn(`[Batch] Image failed for ${p.name} (+${cleanNum}), fallback to text:`, imgErr.message);
+              await sock.sendMessage(jid, { text: p.message });
+            }
+          } else {
+            await sock.sendMessage(jid, { text: p.message });
+          }
+
+          batchJob.sentList.push({
+            num: cleanNum,
+            name: p.name,
+            seats: p.seats,
+            src: p.src,
+            time: new Date().toLocaleTimeString('en-IN', { hour12: true })
+          });
+
+          console.log(`[Batch] (${i + 1}/${passengers.length}) Sent to ${p.name} (+${cleanNum}) [Seats: ${(p.seats||[]).join(',')}]`);
+        } catch (err) {
+          console.error(`[Batch] Failed for ${p.name} (+${cleanNum}):`, err.message);
+          batchJob.failedList.push({
+            num: cleanNum,
+            name: p.name,
+            seats: p.seats,
+            src: p.src,
+            error: err.message || 'WhatsApp message rejected'
+          });
+        }
+
+        // Safe rate-limiting delay between messages (if not last item)
+        if (i < passengers.length - 1 && !batchJob.shouldCancel) {
+          const ms = Math.max(delaySeconds, 3) * 1000;
+          await new Promise(r => setTimeout(r, ms));
+        }
       }
+    } catch (fatalErr) {
+      console.error('[Batch] Fatal loop error:', fatalErr);
+    } finally {
+      batchJob.isSending = false;
+      batchJob.finishedAt = new Date().toISOString();
+      batchJob.currentPassenger = null;
+      console.log(`[Batch] Complete! Successfully sent: ${batchJob.sentList.length}, Failed: ${batchJob.failedList.length}`);
     }
-
-    batchJob.isSending = false;
-    batchJob.finishedAt = new Date().toISOString();
-    batchJob.currentPassenger = null;
-    console.log(`[Batch] Complete! Successfully sent: ${batchJob.sentList.length}, Failed: ${batchJob.failedList.length}`);
   })();
 });
 
@@ -242,6 +270,7 @@ app.get('/api/send-batch/progress', (req, res) => {
 app.post('/api/send-batch/cancel', (req, res) => {
   if (batchJob.isSending) {
     batchJob.shouldCancel = true;
+    batchJob.isSending = false;
     return res.json({ success: true, message: 'Cancellation signal sent.' });
   }
   res.json({ success: true, message: 'No job running.' });
@@ -263,25 +292,35 @@ app.post('/api/send-single', async (req, res) => {
     return res.status(400).json({ error: 'Message text cannot be empty.' });
   }
 
+  const cleanNum = String(recipient.num).replace(/\D/g, '');
+  if (!cleanNum || cleanNum.length < 10) {
+    return res.status(400).json({ error: 'Valid recipient phone number is required.' });
+  }
+
   let imageBuffer = null;
   if (imageBase64 && typeof imageBase64 === 'string') {
     const clean = imageBase64.replace(/^data:image\/\w+;base64,/, '');
     imageBuffer = Buffer.from(clean, 'base64');
   }
 
-  const jid = `${recipient.num}@s.whatsapp.net`;
+  const jid = `${cleanNum}@s.whatsapp.net`;
   try {
     if (imageBuffer && imageBuffer.length > 0) {
-      await sock.sendMessage(jid, {
-        image: imageBuffer,
-        caption: message
-      });
+      try {
+        await sock.sendMessage(jid, {
+          image: imageBuffer,
+          caption: message
+        });
+      } catch (imgErr) {
+        console.warn(`[Root Single] Image failed, fallback to text:`, imgErr.message);
+        await sock.sendMessage(jid, { text: message });
+      }
     } else {
       await sock.sendMessage(jid, { text: message });
     }
 
     const receipt = {
-      num: recipient.num,
+      num: cleanNum,
       name: recipient.name || 'Passenger',
       seats: recipient.seats || [],
       src: recipient.src || 'r',
@@ -289,12 +328,12 @@ app.post('/api/send-single', async (req, res) => {
     };
 
     if (!batchJob.sentList) batchJob.sentList = [];
-    batchJob.sentList = [receipt, ...batchJob.sentList.filter(s => s.num !== recipient.num)];
+    batchJob.sentList = [receipt, ...batchJob.sentList.filter(s => s.num !== cleanNum)];
 
-    console.log(`[Root Single] Sent successfully to ${recipient.name} (+${recipient.num})`);
+    console.log(`[Root Single] Sent successfully to ${recipient.name} (+${cleanNum})`);
     res.json({ success: true, receipt });
   } catch (err) {
-    console.error(`[Root Single] Failed for ${recipient.num}:`, err.message);
+    console.error(`[Root Single] Failed for ${cleanNum}:`, err.message);
     res.status(500).json({ error: err.message });
   }
 });

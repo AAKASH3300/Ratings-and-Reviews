@@ -98,7 +98,13 @@ export default function App() {
         const res = await fetch('/api/whatsapp/status');
         if (res.ok) {
           const data = await res.json();
-          setWaStatus(data.status);
+          setWaStatus(prev => {
+            if (prev !== 'connected' && data.status === 'connected') {
+              showToast(`🎉 WhatsApp Connected as +${data.userPhone || 'Reception'}! Ready to send.`);
+              setShowQrModal(false);
+            }
+            return data.status;
+          });
           setWaQrCode(data.qrCode);
           setWaUserPhone(data.userPhone);
         }
@@ -223,6 +229,7 @@ export default function App() {
   const handleSendSingle = async (guestToSend) => {
     if (waStatus !== 'connected') {
       setShowQrModal(true);
+      showToast('📱 Please link WhatsApp using the QR code first!');
       return;
     }
     if (!guestToSend || !guestToSend.num) return;
@@ -246,6 +253,9 @@ export default function App() {
       const data = await res.json();
       if (!res.ok) {
         alert('Failed to send: ' + (data.error || 'Unknown error'));
+        if (data.error && data.error.includes('WhatsApp is not connected')) {
+          setShowQrModal(true);
+        }
       } else {
         showToast(`✓ Review request sent to ${guestToSend.name}!`);
         if (data.receipt) {
@@ -264,6 +274,11 @@ export default function App() {
 
   // Instant Send Directly from Quick Add Form
   const handleSendQuickNow = async () => {
+    if (waStatus !== 'connected') {
+      setShowQrModal(true);
+      showToast('📱 Please link WhatsApp using the QR code first!');
+      return;
+    }
     const validNum = normalizePhone(quickNum);
     if (!validNum) {
       return alert('Please enter a valid 10-digit mobile number (e.g. 9840012345).');
@@ -291,9 +306,10 @@ export default function App() {
   const handleSendAll = async () => {
     if (waStatus !== 'connected') {
       setShowQrModal(true);
+      showToast('📱 Please scan the WhatsApp QR code to link reception phone first!');
       return;
     }
-    if (!guests.length) return alert('No guests in list.');
+    if (!guests.length) return alert('No guests in list. Please upload or add guests first.');
     if (!googleLink.trim()) return alert('Please enter your Google Review link.');
 
     const payloadGuests = guests.map(g => ({
@@ -315,8 +331,14 @@ export default function App() {
         })
       });
       const data = await res.json();
-      if (!res.ok) alert('Failed: ' + (data.error || 'Unknown error'));
-      else showToast('🚀 Sending review requests to guests!');
+      if (!res.ok) {
+        alert('Failed: ' + (data.error || 'Unknown error'));
+        if (data.error && data.error.includes('WhatsApp is not connected')) {
+          setShowQrModal(true);
+        }
+      } else {
+        showToast('🚀 Automated sending started! Watch live receipts below.');
+      }
     } catch (e) {
       alert('Network error: ' + e.message);
     }
@@ -324,13 +346,18 @@ export default function App() {
 
   const handleCancelSend = async () => {
     if (confirm('Cancel remaining guest messages?')) {
-      try { await fetch('/api/send-batch/cancel', { method: 'POST' }); } catch (e) {}
+      try {
+        await fetch('/api/send-batch/cancel', { method: 'POST' });
+        showToast('⏹ Sending cancelled.');
+      } catch (e) {}
     }
   };
 
   const total = guests.length;
   const sentCount = (batchProgress.sentList || []).length;
-  const percentDone = total ? Math.round((sentCount / total) * 100) : 0;
+  const failedCount = (batchProgress.failedList || []).length;
+  const processedCount = sentCount + failedCount;
+  const percentDone = total ? Math.min(100, Math.round((processedCount / total) * 100)) : 0;
   const isSending = batchProgress.isSending;
   const sentNumSet = new Set((batchProgress.sentList || []).map(s => s.num));
 
@@ -782,7 +809,14 @@ export default function App() {
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--muted)' }}>
-            <span><strong>{sentCount}</strong> sent of <strong>{total}</strong></span>
+            <span>
+              <strong>{sentCount}</strong> sent
+              {failedCount > 0 && (
+                <span style={{ color: 'var(--warn)', fontWeight: 700, marginLeft: 8 }}>
+                  • {failedCount} failed
+                </span>
+              )} of <strong>{total}</strong>
+            </span>
             <span><strong>{percentDone}%</strong> completed</span>
           </div>
 
@@ -791,21 +825,59 @@ export default function App() {
               type="button"
               className="btn btn-ghost"
               onClick={handleCancelSend}
-              style={{ minHeight: 52, fontSize: 16, color: 'var(--warn)', borderColor: 'var(--warn)' }}
+              style={{
+                minHeight: 52,
+                fontSize: 15,
+                fontWeight: 700,
+                color: 'var(--warn)',
+                borderColor: 'var(--warn)',
+                background: 'rgba(239, 68, 68, 0.08)'
+              }}
             >
-              ⏹ Stop / Cancel Sending
+              <span style={{ marginRight: 8, display: 'inline-block' }}>⏳</span>
+              Sending ({batchProgress.currentIndex || 1} of {total})... Click to Stop
+            </button>
+          ) : waStatus !== 'connected' ? (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => {
+                setShowQrModal(true);
+                showToast('📱 Please scan the WhatsApp QR code first!');
+              }}
+              style={{ minHeight: 52, fontSize: 16, fontWeight: 800, background: '#25D366', color: '#000' }}
+            >
+              📱 Link WhatsApp to Send ({total} Guests)
             </button>
           ) : (
             <button
               type="button"
               className="btn btn-primary"
               onClick={handleSendAll}
+              disabled={!total}
               style={{ minHeight: 52, fontSize: 16, fontWeight: 800 }}
             >
               🚀 Send to All Guests (1-Click)
             </button>
           )}
         </div>
+
+        {/* Failed Receipts / Warnings if any */}
+        {(batchProgress.failedList && batchProgress.failedList.length > 0) && (
+          <div style={{ marginTop: 12 }}>
+            <h4 style={{ margin: '0 0 8px 0', fontSize: 14.5, color: 'var(--warn)' }}>
+              ⚠️ Delivery Failures / Skipped ({batchProgress.failedList.length})
+            </h4>
+            <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid var(--warn)', borderRadius: 12, padding: 10, fontSize: 13, background: 'rgba(239, 68, 68, 0.05)' }}>
+              {batchProgress.failedList.map((f, idx) => (
+                <div key={idx} style={{ padding: '6px 8px', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                  <span>❌ <strong>{f.name}</strong> ({formatPhoneDisplay(f.num)})</span>
+                  <span style={{ color: 'var(--warn)', fontWeight: 600 }}>{f.error || 'Delivery failed'}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Live Receipts */}
         {(batchProgress.sentList && batchProgress.sentList.length > 0) && (
@@ -894,6 +966,76 @@ export default function App() {
 
       {/* Toast */}
       <div className={`toast ${toastMsg ? 'show' : ''}`} role="status">{toastMsg}</div>
+
+      {/* WhatsApp Link QR Modal Overlay */}
+      {showQrModal && (
+        <div className="qr-modal-backdrop" onClick={() => setShowQrModal(false)}>
+          <div className="qr-modal-card" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="modal-close-btn"
+              onClick={() => setShowQrModal(false)}
+              title="Close"
+            >
+              ✕
+            </button>
+
+            <div style={{ fontSize: 38, marginBottom: 6 }}>📱</div>
+            <h3 style={{ margin: '0 0 8px 0', fontSize: 20, fontWeight: 700 }}>Link Reception WhatsApp Phone</h3>
+            <p style={{ margin: '0 0 16px 0', fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.5 }}>
+              Scan this QR code with WhatsApp on your hotel phone to start automated 1-click review reminders.
+            </p>
+
+            <div style={{
+              background: '#FFFFFF',
+              padding: 16,
+              borderRadius: 16,
+              display: 'inline-block',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+              margin: '0 auto 16px auto'
+            }}>
+              {waQrCode ? (
+                <img
+                  src={waQrCode}
+                  alt="WhatsApp QR Code"
+                  style={{ width: 220, height: 220, display: 'block' }}
+                />
+              ) : (
+                <div style={{ width: 220, height: 220, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#666', gap: 10 }}>
+                  <div style={{ fontSize: 24 }}>⏳</div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>Generating QR Code...</div>
+                  <div style={{ fontSize: 11, color: '#999' }}>Takes 2-3 seconds</div>
+                </div>
+              )}
+            </div>
+
+            <ol style={{ textAlign: 'left', margin: '0 auto 18px auto', paddingLeft: 22, fontSize: 13, color: 'var(--ink)', lineHeight: 1.6, maxWidth: 360 }}>
+              <li>Open <strong>WhatsApp</strong> on reception mobile</li>
+              <li>Tap <strong>Settings / Menu (⋮)</strong> &rarr; <strong>Linked Devices</strong></li>
+              <li>Tap <strong>Link a Device</strong> & scan this QR code</li>
+            </ol>
+
+            <div className="row-inline" style={{ justifyContent: 'center', gap: 10 }}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-small"
+                onClick={() => setShowQrModal(false)}
+              >
+                Close Window
+              </button>
+              {waStatus === 'connected' && (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-small"
+                  onClick={() => setShowQrModal(false)}
+                >
+                  ✓ Connected as +{waUserPhone}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

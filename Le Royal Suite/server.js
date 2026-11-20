@@ -178,56 +178,82 @@ app.post('/api/send-batch', async (req, res) => {
   (async () => {
     console.log(`[Le Royal Suite Batch] Sending to ${guests.length} guests (image: ${!!imageBuffer})...`);
 
-    for (let i = 0; i < guests.length; i++) {
-      if (batchJob.shouldCancel) break;
-
-      const g = guests[i];
-      batchJob.currentIndex = i + 1;
-      batchJob.currentGuest = { name: g.name, num: g.num, rooms: g.rooms, src: g.src };
-
-      const jid = `${g.num}@s.whatsapp.net`;
-
-      try {
-        if (imageBuffer && imageBuffer.length > 0) {
-          // Send photo with hotel review request as caption!
-          await sock.sendMessage(jid, {
-            image: imageBuffer,
-            caption: g.message
-          });
-        } else {
-          // Send formatted text message with emojis
-          await sock.sendMessage(jid, { text: g.message });
+    try {
+      for (let i = 0; i < guests.length; i++) {
+        if (batchJob.shouldCancel) {
+          console.log('[Le Royal Suite Batch] Job cancelled by user.');
+          break;
         }
 
-        batchJob.sentList.push({
-          num: g.num,
-          name: g.name,
-          rooms: g.rooms,
-          src: g.src,
-          time: new Date().toLocaleTimeString('en-IN', { hour12: true })
-        });
+        const g = guests[i];
+        batchJob.currentIndex = i + 1;
+        batchJob.currentGuest = { name: g.name, num: g.num, rooms: g.rooms, src: g.src };
 
-        console.log(`[Le Royal Suite Batch] (${i + 1}/${guests.length}) Sent to ${g.name} (+${g.num})`);
-      } catch (err) {
-        console.error(`[Le Royal Suite Batch] Failed for ${g.name}:`, err.message);
-        batchJob.failedList.push({
-          num: g.num,
-          name: g.name,
-          rooms: g.rooms,
-          src: g.src,
-          error: err.message
-        });
-      }
+        const cleanNum = String(g.num || '').replace(/\D/g, '');
+        if (!cleanNum || cleanNum.length < 10) {
+          console.error(`[Le Royal Suite Batch] Invalid phone number for ${g.name}: ${g.num}`);
+          batchJob.failedList.push({
+            num: g.num,
+            name: g.name,
+            rooms: g.rooms,
+            src: g.src,
+            error: 'Invalid phone number format'
+          });
+          continue;
+        }
 
-      if (i < guests.length - 1 && !batchJob.shouldCancel) {
-        const ms = Math.max(delaySeconds, 3) * 1000;
-        await new Promise(r => setTimeout(r, ms));
+        const jid = `${cleanNum}@s.whatsapp.net`;
+
+        try {
+          if (imageBuffer && imageBuffer.length > 0) {
+            try {
+              // Attempt photo with hotel review request as caption!
+              await sock.sendMessage(jid, {
+                image: imageBuffer,
+                caption: g.message
+              });
+            } catch (imgErr) {
+              console.warn(`[Le Royal Suite Batch] Image failed for ${g.name} (+${cleanNum}), falling back to text:`, imgErr.message);
+              await sock.sendMessage(jid, { text: g.message });
+            }
+          } else {
+            // Send formatted text message with emojis
+            await sock.sendMessage(jid, { text: g.message });
+          }
+
+          batchJob.sentList.push({
+            num: cleanNum,
+            name: g.name,
+            rooms: g.rooms,
+            src: g.src,
+            time: new Date().toLocaleTimeString('en-IN', { hour12: true })
+          });
+
+          console.log(`[Le Royal Suite Batch] (${i + 1}/${guests.length}) Sent to ${g.name} (+${cleanNum})`);
+        } catch (err) {
+          console.error(`[Le Royal Suite Batch] Failed for ${g.name} (+${cleanNum}):`, err.message);
+          batchJob.failedList.push({
+            num: cleanNum,
+            name: g.name,
+            rooms: g.rooms,
+            src: g.src,
+            error: err.message || 'WhatsApp message rejected'
+          });
+        }
+
+        if (i < guests.length - 1 && !batchJob.shouldCancel) {
+          const ms = Math.max(delaySeconds, 3) * 1000;
+          await new Promise(r => setTimeout(r, ms));
+        }
       }
+    } catch (fatalErr) {
+      console.error('[Le Royal Suite Batch] Fatal loop error:', fatalErr);
+    } finally {
+      batchJob.isSending = false;
+      batchJob.finishedAt = new Date().toISOString();
+      batchJob.currentGuest = null;
+      console.log(`[Le Royal Suite Batch] Finished. Sent: ${batchJob.sentList.length}, Failed: ${batchJob.failedList.length}`);
     }
-
-    batchJob.isSending = false;
-    batchJob.finishedAt = new Date().toISOString();
-    batchJob.currentGuest = null;
   })();
 });
 
@@ -238,6 +264,7 @@ app.get('/api/send-batch/progress', (req, res) => {
 app.post('/api/send-batch/cancel', (req, res) => {
   if (batchJob.isSending) {
     batchJob.shouldCancel = true;
+    batchJob.isSending = false;
     return res.json({ success: true, message: 'Cancelled.' });
   }
   res.json({ success: true, message: 'No job running.' });
@@ -259,30 +286,51 @@ app.post('/api/send-single', async (req, res) => {
     return res.status(400).json({ error: 'Message text cannot be empty.' });
   }
 
+  const cleanNum = String(recipient.num).replace(/\D/g, '');
+  if (!cleanNum || cleanNum.length < 10) {
+    return res.status(400).json({ error: 'Valid recipient phone number is required.' });
+  }
+
   let imageBuffer = null;
   if (imageBase64 && typeof imageBase64 === 'string') {
     const clean = imageBase64.replace(/^data:image\/\w+;base64,/, '');
     imageBuffer = Buffer.from(clean, 'base64');
   }
 
-  const jid = `${recipient.num}@s.whatsapp.net`;
+  const jid = `${cleanNum}@s.whatsapp.net`;
   try {
     if (imageBuffer && imageBuffer.length > 0) {
-      await sock.sendMessage(jid, {
-        image: imageBuffer,
-        caption: message
-      });
+      try {
+        await sock.sendMessage(jid, {
+          image: imageBuffer,
+          caption: message
+        });
+      } catch (imgErr) {
+        console.warn(`[Le Royal Suite Single] Image failed, fallback to text:`, imgErr.message);
+        await sock.sendMessage(jid, { text: message });
+      }
     } else {
       await sock.sendMessage(jid, { text: message });
     }
 
     const receipt = {
-      num: recipient.num,
+      num: cleanNum,
       name: recipient.name || 'Guest',
       rooms: recipient.rooms || [],
       src: recipient.src || 'Direct',
       time: new Date().toLocaleTimeString('en-IN', { hour12: true })
     };
+
+    if (!batchJob.sentList) batchJob.sentList = [];
+    batchJob.sentList = [receipt, ...batchJob.sentList.filter(s => s.num !== cleanNum)];
+
+    console.log(`[Le Royal Suite Single] Sent successfully to ${recipient.name} (+${cleanNum})`);
+    res.json({ success: true, receipt });
+  } catch (err) {
+    console.error(`[Le Royal Suite Single] Failed for ${cleanNum}:`, err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
     if (!batchJob.sentList) batchJob.sentList = [];
     batchJob.sentList = [receipt, ...batchJob.sentList.filter(s => s.num !== recipient.num)];
