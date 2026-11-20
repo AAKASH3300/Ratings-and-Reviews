@@ -332,17 +332,6 @@ app.post('/api/send-single', async (req, res) => {
   }
 });
 
-    if (!batchJob.sentList) batchJob.sentList = [];
-    batchJob.sentList = [receipt, ...batchJob.sentList.filter(s => s.num !== recipient.num)];
-
-    console.log(`[Le Royal Suite Single] Sent successfully to ${recipient.name} (+${recipient.num})`);
-    res.json({ success: true, receipt });
-  } catch (err) {
-    console.error(`[Le Royal Suite Single] Failed for ${recipient.num}:`, err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // Serve static React files
 const distPath = path.join(__dirname, 'dist');
 if (fs.existsSync(distPath)) {
