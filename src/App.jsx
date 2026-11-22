@@ -2,13 +2,92 @@ import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { parseChartContent, formatPhoneDisplay, normalizePhone, cleanPassengerName, titleCase } from './utils/ezeeinfoParser';
 
-const KEY = 'spyderzlink-bus-v1';
+const KEY = 'spyderzlink-bus-v2';
 const BUS_EMOJIS = ['🚌', '🚍', '⭐', '🌟', '🙏', '✨', '🛣️', '🎫', '🛋️', '❄️', '📍', '💖'];
 
-const R_EN = "Hi {name}, thank you for travelling with {bus} ({route}) yesterday! ⭐ redBus will send you a message on WhatsApp to rate your trip. If you enjoyed your journey, please give us a 5-star rating on redBus 🚌✨. As a new service, your rating helps us tremendously! 🙏";
-const R_TA = "வணக்கம் {name}, நேற்று {bus}-ல் ({route}) பயணம் செய்தமைக்கு மிக்க நன்றி! 🚌 உங்கள் பயணத்தை rate செய்ய redBus WhatsApp-ல் ஒரு செய்தி அனுப்பும். பயணம் பிடித்திருந்தால், redBus-ல் எங்களுக்கு 5-star rating கொடுங்கள் ⭐⭐⭐⭐⭐. உங்கள் ஆதரவு எங்களுக்கு மிகவும் உதவும்! 🙏✨";
-const D_EN = "Hi {name}, thank you for travelling with {bus} ({route}) yesterday! 🚌 How was your trip? If you enjoyed your journey, a quick 5-star Google review would really help our service: {link} ⭐⭐⭐⭐⭐ - Thank you! 🙏";
-const D_TA = "வணக்கம் {name}, நேற்று {bus}-ல் ({route}) பயணம் செய்தமைக்கு மிக்க நன்றி! 🚌 உங்கள் பயண அனுபவம் எப்படி இருந்தது? ஒரு நிமிடம் ஒதுக்கி எங்களுக்கு ஒரு Google review கொடுத்தால் மிகவும் உதவியாக இருக்கும்: {link} ⭐⭐⭐⭐⭐ - நன்றி! 🙏";
+const R_EN = `Hi {name} , ❤️
+
+Thank you for travelling with SPYDER Z LINK! 🚌
+
+We hope your journey was comfortable and enjoyable.
+
+We would love to hear your feedback:
+
+1. Was your journey comfortable?
+2. Were you satisfied with our bus service?
+3. Do you have any complaints or suggestions?
+4. How would you rate your overall travel experience?
+
+⭐ Please share your valuable rating and feedback.
+
+Your feedback helps us improve our service and serve you better.
+
+Regards,
+SPYDER Z LINK
+Your Safety, Our Promise! ❤️`;
+
+const R_TA = `வணக்கம் {name} , ❤️
+
+SPYDER Z LINK-ல் பயணம் செய்தமைக்கு மிக்க நன்றி! 🚌
+
+உங்கள் பயணம் இனிமையாகவும் வசதியாகவும் அமைந்திருக்கும் என நம்புகிறோம்.
+
+உங்கள் கருத்துக்களை எங்களுடன் பகிர்ந்துகொள்ளுங்கள்:
+
+1. உங்கள் பயணம் வசதியாக இருந்ததா?
+2. எங்கள் பேருந்து சேவை உங்களுக்கு திருப்திகரமாக இருந்ததா?
+3. ஏதேனும் குறைகள் அல்லது ஆலோசனைகள் உள்ளதா?
+4. உங்கள் ஒட்டுமொத்த பயண அனுபவத்தை எவ்வாறு மதிப்பிடுவீர்கள்?
+
+⭐ தயவுசெய்து உங்கள் மதிப்புமிக்க மதிப்பீட்டையும் (rating) கருத்துக்களையும் பகிருங்கள்.
+
+உங்கள் கருத்துக்கள் எங்கள் சேவையை மேம்படுத்த மிகவும் உதவும்.
+
+அன்புடன்,
+SPYDER Z LINK
+உங்கள் பாதுகாப்பு, எங்கள் உறுதிமொழி! ❤️`;
+
+const D_EN = `Hi {name} , ❤️
+
+Thank you for travelling with SPYDER Z LINK! 🚌
+
+We hope your journey was comfortable and enjoyable.
+
+We would love to hear your feedback:
+
+1. Was your journey comfortable?
+2. Were you satisfied with our bus service?
+3. Do you have any complaints or suggestions?
+4. How would you rate your overall travel experience?
+
+⭐ Please share your valuable rating and feedback: {link}
+
+Your feedback helps us improve our service and serve you better.
+
+Regards,
+SPYDER Z LINK
+Your Safety, Our Promise! ❤️`;
+
+const D_TA = `வணக்கம் {name} , ❤️
+
+SPYDER Z LINK-ல் பயணம் செய்தமைக்கு மிக்க நன்றி! 🚌
+
+உங்கள் பயணம் இனிமையாகவும் வசதியாகவும் அமைந்திருக்கும் என நம்புகிறோம்.
+
+உங்கள் கருத்துக்களை எங்களுடன் பகிர்ந்துகொள்ளுங்கள்:
+
+1. உங்கள் பயணம் வசதியாக இருந்ததா?
+2. எங்கள் பேருந்து சேவை உங்களுக்கு திருப்திகரமாக இருந்ததா?
+3. ஏதேனும் குறைகள் அல்லது ஆலோசனைகள் உள்ளதா?
+4. உங்கள் ஒட்டுமொத்த பயண அனுபவத்தை எவ்வாறு மதிப்பிடுவீர்கள்?
+
+⭐ தயவுசெய்து உங்கள் மதிப்புமிக்க Google review-ஐ பகிருங்கள்: {link}
+
+உங்கள் கருத்துக்கள் எங்கள் சேவையை மேம்படுத்த மிகவும் உதவும்.
+
+அன்புடன்,
+SPYDER Z LINK
+உங்கள் பாதுகாப்பு, எங்கள் உறுதிமொழி! ❤️`;
 
 export default function App() {
   const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
@@ -17,8 +96,8 @@ export default function App() {
   const [route, setRoute] = useState('Udumalaipettai to Chennai');
   const [date, setDate] = useState(yesterday);
   const [googleLink, setGoogleLink] = useState('');
-  const [tplR, setTplR] = useState(R_TA);
-  const [tplD, setTplD] = useState(D_TA);
+  const [tplR, setTplR] = useState(R_EN);
+  const [tplD, setTplD] = useState(D_EN);
   const [activeTab, setActiveTab] = useState('r');
   const [useFirstName, setUseFirstName] = useState(false);
   const [defSrc, setDefSrc] = useState('r');
@@ -162,12 +241,12 @@ export default function App() {
     const name = getDisplayName(p && p.name);
     const seatStr = (p && p.seats && p.seats.length) ? p.seats.join(', ') : '';
     return tpl
-      .split('{name}').join(name)
-      .split('{bus}').join(bus || 'SpyderZ Link')
-      .split('{route}').join(route || 'Udumalaipettai to Chennai')
-      .split('{date}').join(date || 'yesterday')
-      .split('{seat}').join(seatStr)
-      .split('{link}').join(googleLink.trim() || '{link}');
+      .replace(/\{\s*name\s*\}/gi, name)
+      .replace(/\{\s*bus\s*\}/gi, bus || 'SPYDER Z LINK')
+      .replace(/\{\s*route\s*\}/gi, route || 'Udumalaipettai to Chennai')
+      .replace(/\{\s*date\s*\}/gi, date || 'yesterday')
+      .replace(/\{\s*seat\s*\}/gi, seatStr)
+      .replace(/\{\s*link\s*\}/gi, googleLink.trim() || '{link}');
   };
 
   const insertText = (str) => {
